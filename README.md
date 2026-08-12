@@ -154,7 +154,7 @@ Rules AND-combine `id` (wildcards allowed) and `mod`, like recipe rules. Additio
 If the mod is installed on your **client** too, you can create recipes visually instead of writing JSON: run `/recipeeditor` while in a world.
 
 - Click the type button at the top to open a searchable list of every recipe type the editor knows; picking one draws that station's own GUI (crafting table, furnace, smithing table, …) or a generic panel for auto-detected modded types. Full station GUIs show your inventory in its normal place, like the real screen.
-- **Native support** ships for known mods (shown automatically when the mod is installed): Farmer's Delight Refabricated (cooking pot, cutting board — Alt+scroll a result to set its drop chance), Brewin' and Chewin' (keg fermenting, keg pouring, distilling — fluid amounts always saved in millibuckets, so recipes behave the same on every loader), [Let's Do] Vinery (fermentation barrel with juice type/amount fields, apple press mashing & fermenting), and [Let's Do] Herbal Brews (tea kettle; its dummy cauldron type is hidden).
+- **Native support** ships for known mods — see the [supported mods list](#natively-supported-mods) below. Each appears automatically when that mod is installed; every other mod's types are covered by [automatic detection](#modded-recipe-types--automatic).
 - Hover a text field to see the values existing recipes actually use for it (e.g. which `unit` strings a mod accepts) — collected automatically from all loaded recipes of that type.
 - Click a highlighted slot to choose an item from a searchable list (type `#` to search **tags** — item tags, or fluid tags on slots that accept them); right-click clears a slot. For slot types that support amounts, scroll the mouse wheel over the slot to change the count; where a recipe supports per-result chances, Alt+scroll sets them.
 - Your **inventory** is shown in the editor — click an item to pick it up, then click it into as many slots as you like (right-click drops it), or just drag it onto a slot. Buckets dropped on fluid slots become their fluid.
@@ -164,6 +164,20 @@ If the mod is installed on your **client** too, you can create recipes visually 
 - Closing and reopening the editor brings back your last recipe type, slot contents, amounts, and field values (kept until the game quits).
 
 Saving sends the recipe to the server (op only), where it is validated by the real recipe parser, appended to `config/datarewriter/gui-recipes.json5` — a normal config file you can edit later — and **applied immediately** to the running game (no `/reload`; the recipe is live and synced to all players the moment you save). Nothing extra is needed on other players' clients or on the server beyond the mod itself.
+
+### Natively supported mods
+
+Hand-tuned layouts (drawn on the mod's own GUI where one exists) ship for:
+
+| Mod | Recipe types | Notes |
+|-----|--------------|-------|
+| Minecraft | crafting (shaped & shapeless), smelting, blasting, smoking, campfire cooking, stonecutting, smithing (upgrade & trim) | always available, real station GUIs |
+| Farmer's Delight Refabricated | `cooking` (cooking pot GUI), `cutting` | cutting board: tool slot + up to 4 results with drop chances |
+| Brewin' and Chewin' | `fermenting`, `keg_pouring` (keg GUI), `distilling` | fluid slots with tag support; units always saved as millibuckets; distilling covers the mod's upcoming release |
+| [Let's Do] Vinery | `wine_fermentation` (fermentation barrel GUI), `apple_mashing`, `apple_fermenting` (apple press GUI) | juice is set via type/amount fields (all valid juice types suggested) |
+| [Let's Do] Herbal Brews | `kettle_brewing` (tea kettle GUI) | the dummy `cauldron_brewing` type is hidden |
+| Ube's Delight | `baking_mat` | tool, 3×3 ingredients, chance results, optional processing stages |
+| Runes | `crafting` (altar GUI) | smithing-style base + addition; OR-alternatives via `#tags` |
 
 ### Modded recipe types — automatic
 

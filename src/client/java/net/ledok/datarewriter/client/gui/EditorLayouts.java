@@ -207,6 +207,10 @@ public final class EditorLayouts {
             // An entry of just { type: "somemod:sometype", hidden: true } removes
             // that recipe type from the editor entirely (useful for dynamic or
             // dummy recipe types that can't sensibly be created).
+            //
+            // An optional "template": { ... } object is merged into every saved
+            // recipe before slots/fields — for keys a codec requires even when
+            // empty (e.g. a mandatory empty list that slots then append into).
             // "field" paths support nesting ("result.item") and arrays ("ingredients[]").
             //
             // If the texture is a full 176x166 container GUI, add "inventory_y": 84

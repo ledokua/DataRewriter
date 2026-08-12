@@ -114,6 +114,12 @@ public final class EditorLayout {
     public final Kind kind;
     public final List<SlotDef> slots;
     public final List<FieldDef> fields;
+    /**
+     * Constant JSON merged into every saved recipe before slots/fields are
+     * written — for keys a codec requires even when empty (e.g. a mandatory
+     * empty array that filled slots then append into). Null = none.
+     */
+    public JsonObject template;
 
     public EditorLayout(String typeId, String displayName, ResourceLocation texture,
                         int u, int v, int width, int height, int inventoryY,
@@ -225,8 +231,12 @@ public final class EditorLayout {
             }
         }
 
-        return new EditorLayout(typeId, name, texture, crop[0], crop[1], crop[2], crop[3],
+        EditorLayout layout = new EditorLayout(typeId, name, texture, crop[0], crop[1], crop[2], crop[3],
                 inventoryY, Kind.SLOTS, slots, fields);
+        if (obj.get("template") instanceof JsonObject template) {
+            layout.template = template.deepCopy();
+        }
+        return layout;
     }
 
     /**

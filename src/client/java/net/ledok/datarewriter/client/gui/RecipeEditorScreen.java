@@ -822,7 +822,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private JsonObject buildRecipe() {
-        JsonObject recipe = new JsonObject();
+        JsonObject recipe = layout.template != null ? layout.template.deepCopy() : new JsonObject();
         recipe.addProperty("type", layout.typeId);
         String id = idText.trim();
         if (!id.isEmpty()) {

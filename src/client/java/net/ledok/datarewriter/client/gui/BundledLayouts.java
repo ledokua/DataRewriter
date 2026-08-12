@@ -1,5 +1,6 @@
 package net.ledok.datarewriter.client.gui;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -55,7 +56,71 @@ final class BundledLayouts {
         if (typeExists("vinery:apple_fermenting")) {
             layouts.add(vineryAppleFermenting());
         }
+        if (typeExists("ubesdelight:baking_mat")) {
+            layouts.add(ubesBakingMat());
+        }
+        if (typeExists("runes:crafting")) {
+            layouts.add(runesCrafting());
+        }
         return layouts;
+    }
+
+    /** FD-Refabricated-style chance result: {"item": {"id", "count"}, "chance": c}. */
+    private static EditorLayout.SlotValueBuilder chanceResult() {
+        return (ref, count, chance) -> {
+            JsonObject item = new JsonObject();
+            item.addProperty("id", ref);
+            if (count > 1) {
+                item.addProperty("count", count);
+            }
+            JsonObject entry = new JsonObject();
+            entry.add("item", item);
+            if (chance < 1f) {
+                entry.addProperty("chance", chance);
+            }
+            return entry;
+        };
+    }
+
+    /**
+     * Baking mat (no GUI — card panel with the inventory below): tool on top,
+     * up to 9 ingredients, up to 4 chance results, and up to 5 optional
+     * render-only processing stages. The 1.21.1 refab port's codec expects
+     * "processing_stages" to always exist, so the layout template pre-seeds
+     * an empty array that filled stage slots append into.
+     */
+    private static EditorLayout ubesBakingMat() {
+        List<SlotDef> slots = new ArrayList<>();
+        slots.add(new SlotDef(79, 10, "tool", SlotFormat.INGREDIENT, false, true));
+        for (int i = 0; i < 9; i++) {
+            slots.add(new SlotDef(13 + (i % 3) * 18, 32 + (i / 3) * 18, "ingredients[]",
+                    SlotFormat.INGREDIENT, false, i == 0));
+        }
+        for (int i = 0; i < 4; i++) {
+            slots.add(new SlotDef(122 + (i % 2) * 18, 37 + (i / 2) * 18, "result[]",
+                    SlotFormat.ITEM, true, i == 0, true, chanceResult()));
+        }
+        for (int i = 0; i < 5; i++) {
+            slots.add(new SlotDef(40 + i * 18, 88, "processing_stages[]",
+                    SlotFormat.INGREDIENT, false, false));
+        }
+        EditorLayout layout = new EditorLayout("ubesdelight:baking_mat", "Baking Mat (Ube's Delight)",
+                null, 0, 0, 176, 190, 110, Kind.SLOTS, slots, List.of());
+        JsonObject template = new JsonObject();
+        template.add("processing_stages", new JsonArray());
+        layout.template = template;
+        return layout;
+    }
+
+    /** Rune crafting altar: smithing-style base + addition -> result. */
+    private static EditorLayout runesCrafting() {
+        List<SlotDef> slots = List.of(
+                new SlotDef(27, 47, "base", SlotFormat.INGREDIENT, false, true),
+                new SlotDef(76, 47, "addition", SlotFormat.INGREDIENT, false, true),
+                new SlotDef(134, 47, "result", SlotFormat.ITEM, true, true));
+        return new EditorLayout("runes:crafting", "Crafting Altar (Runes)",
+                ResourceLocation.fromNamespaceAndPath("runes", "textures/gui/crafting_altar.png"),
+                0, 0, 176, 166, 84, Kind.SLOTS, slots, List.of());
     }
 
     private static boolean typeExists(String typeId) {
@@ -95,20 +160,7 @@ final class BundledLayouts {
         slots.add(new SlotDef(35, 38, "ingredients[]", SlotFormat.INGREDIENT, false, true));
         for (int i = 0; i < 4; i++) {
             slots.add(new SlotDef(122 + (i % 2) * 18, 16 + (i / 2) * 18, "result[]",
-                    SlotFormat.ITEM, true, i == 0, true,
-                    (ref, count, chance) -> {
-                        JsonObject item = new JsonObject();
-                        item.addProperty("id", ref);
-                        if (count > 1) {
-                            item.addProperty("count", count);
-                        }
-                        JsonObject entry = new JsonObject();
-                        entry.add("item", item);
-                        if (chance < 1f) {
-                            entry.addProperty("chance", chance);
-                        }
-                        return entry;
-                    }));
+                    SlotFormat.ITEM, true, i == 0, true, chanceResult()));
         }
         return new EditorLayout("farmersdelight:cutting", "Cutting Board (Farmer's Delight)",
                 null, 0, 0, 176, 166, 84, Kind.SLOTS, slots, List.of());
