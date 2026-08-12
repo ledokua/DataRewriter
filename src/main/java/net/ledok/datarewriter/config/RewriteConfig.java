@@ -1,0 +1,149 @@
+package net.ledok.datarewriter.config;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import net.minecraft.core.Holder;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additions,
+                            List<LootRule> lootRemovals, List<AddedLootTable> lootAdditions,
+                            List<LootModification> lootModifications,
+                            int errorCount) {
+    public static final RewriteConfig EMPTY =
+            new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+
+    /** A new (or replacement) recipe in vanilla recipe JSON format. */
+    public record AddedRecipe(ResourceLocation id, JsonElement json) {
+    }
+
+    /** A new (or replacement) loot table in vanilla loot table JSON format. */
+    public record AddedLootTable(ResourceLocation id, JsonElement json) {
+    }
+
+    /**
+     * Injects extra pools into every loot table matching the target rule,
+     * leaving the table's own loot untouched. Applied after remove/add.
+     */
+    public record LootModification(LootRule target, JsonArray pools) {
+    }
+
+    /**
+     * One loot table removal rule; matching tables are emptied so they drop
+     * nothing. All non-null conditions must match (AND); id supports '*'
+     * wildcards, e.g. "minecraft:chests/*".
+     */
+    public record LootRule(@Nullable IdPattern id, @Nullable String mod, String source) {
+        public boolean matches(ResourceLocation tableId) {
+            if (id != null && !id.matches(tableId)) {
+                return false;
+            }
+            return mod == null || mod.equals(tableId.getNamespace());
+        }
+    }
+
+    /**
+     * One removal rule. All non-null conditions must match (AND).
+     * Rules with only id/mod can be applied on the raw JSON map;
+     * output/input/type need the parsed recipe and bound tags.
+     */
+    public record RemovalRule(
+            @Nullable IdPattern id,
+            @Nullable String mod,
+            @Nullable ResourceLocation type,
+            @Nullable String output,
+            @Nullable String input,
+            String source // file the rule came from, for error messages
+    ) {
+        public boolean needsParsedRecipe() {
+            return output != null || input != null || type != null;
+        }
+
+        /** Matching for the raw JSON phase; only used for rules where needsParsedRecipe() is false. */
+        public boolean matchesId(ResourceLocation recipeId) {
+            if (id != null && !id.matches(recipeId)) {
+                return false;
+            }
+            return mod == null || mod.equals(recipeId.getNamespace());
+        }
+
+        /** Full matching against a parsed recipe. Runs after tags are bound. */
+        public boolean matches(RecipeHolder<?> holder, RegistryAccess registries) {
+            ResourceLocation recipeId = holder.id();
+            if (id != null && !id.matches(recipeId)) {
+                return false;
+            }
+            if (mod != null && !mod.equals(recipeId.getNamespace())) {
+                return false;
+            }
+            Recipe<?> recipe = holder.value();
+            if (type != null && !type.equals(BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType()))) {
+                return false;
+            }
+            if (output != null && !outputMatches(recipe, registries)) {
+                return false;
+            }
+            return input == null || inputMatches(recipe, registries);
+        }
+
+        private boolean outputMatches(Recipe<?> recipe, RegistryAccess registries) {
+            ItemStack result;
+            try {
+                result = recipe.getResultItem(registries);
+            } catch (Exception e) {
+                return false; // some modded recipes throw for context-dependent results
+            }
+            if (result == null || result.isEmpty()) {
+                return false;
+            }
+            if (output.startsWith("#")) {
+                TagKey<Item> tag = TagKey.create(Registries.ITEM, ResourceLocation.parse(output.substring(1)));
+                return result.is(tag);
+            }
+            return BuiltInRegistries.ITEM.getKey(result.getItem()).equals(ResourceLocation.parse(output));
+        }
+
+        private boolean inputMatches(Recipe<?> recipe, RegistryAccess registries) {
+            List<ItemStack> probes = new ArrayList<>();
+            if (input.startsWith("#")) {
+                TagKey<Item> tag = TagKey.create(Registries.ITEM, ResourceLocation.parse(input.substring(1)));
+                registries.registryOrThrow(Registries.ITEM).getTag(tag).ifPresent(holders -> {
+                    for (Holder<Item> holder : holders) {
+                        probes.add(new ItemStack(holder));
+                    }
+                });
+            } else {
+                Optional<Item> item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(input));
+                item.ifPresent(value -> probes.add(new ItemStack(value)));
+            }
+            if (probes.isEmpty()) {
+                return false;
+            }
+            try {
+                for (Ingredient ingredient : recipe.getIngredients()) {
+                    for (ItemStack probe : probes) {
+                        if (ingredient.test(probe)) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                return false; // be defensive about modded ingredient implementations
+            }
+            return false;
+        }
+    }
+}

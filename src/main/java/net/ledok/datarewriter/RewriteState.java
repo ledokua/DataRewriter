@@ -1,0 +1,104 @@
+package net.ledok.datarewriter;
+
+import net.ledok.datarewriter.config.ConfigLoader;
+import net.ledok.datarewriter.config.RewriteConfig;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Config and per-reload stats shared between the loot phase (runs first,
+ * loads the config) and the recipe phases.
+ */
+public final class RewriteState {
+    private static volatile RewriteConfig config = RewriteConfig.EMPTY;
+    private static volatile boolean loadedOnce;
+
+    public static volatile int recipesRemovedJson;
+    public static volatile int recipesRemovedParsed;
+    public static volatile int recipesAdded;
+    public static volatile int recipesReplaced;
+    public static volatile int lootRemoved;
+    public static volatile int lootAdded;
+    public static volatile int lootReplaced;
+    public static volatile int lootModified;
+
+    private RewriteState() {
+    }
+
+    /** Called by the earliest hook of a (re)load — the loot table scan. */
+    public static RewriteConfig reloadConfig() {
+        config = ConfigLoader.load();
+        loadedOnce = true;
+        return config;
+    }
+
+    /**
+     * Current config. The loot scan runs before recipes in vanilla's reload
+     * pipeline, so this is fresh by the time recipes load; the fallback only
+     * guards against that hook never having fired at all.
+     */
+    public static RewriteConfig config() {
+        if (!loadedOnce) {
+            return reloadConfig();
+        }
+        return config;
+    }
+
+    /**
+     * Sends a summary of what changed to online operators. Called after
+     * /reload; on server start there is nobody to tell, the log covers it.
+     */
+    public static void announce(MinecraftServer server) {
+        RewriteConfig loaded = config;
+        boolean recipesInUse = !loaded.removals().isEmpty() || !loaded.additions().isEmpty();
+        boolean lootInUse = !loaded.lootRemovals().isEmpty() || !loaded.lootAdditions().isEmpty()
+                || !loaded.lootModifications().isEmpty();
+        if (!recipesInUse && !lootInUse && loaded.errorCount() == 0) {
+            return; // mod not in use, stay quiet
+        }
+
+        StringBuilder text = new StringBuilder();
+        if (recipesInUse) {
+            text.append(String.format("recipes: %d removed, %d added%s",
+                    recipesRemovedJson + recipesRemovedParsed, recipesAdded,
+                    recipesReplaced > 0 ? " (" + recipesReplaced + " replacing)" : ""));
+        }
+        if (lootInUse) {
+            if (!text.isEmpty()) {
+                text.append("; ");
+            }
+            List<String> parts = new ArrayList<>();
+            if (!loaded.lootRemovals().isEmpty()) {
+                parts.add(lootRemoved + " removed");
+            }
+            if (!loaded.lootAdditions().isEmpty()) {
+                parts.add(lootAdded + " added" + (lootReplaced > 0 ? " (" + lootReplaced + " replacing)" : ""));
+            }
+            if (!loaded.lootModifications().isEmpty()) {
+                parts.add(lootModified + " modified");
+            }
+            text.append("loot tables: ").append(String.join(", ", parts));
+        }
+        if (text.isEmpty()) {
+            text.append("no changes");
+        }
+
+        MutableComponent message = Component.literal("[DataRewriter] ").withStyle(ChatFormatting.GOLD)
+                .append(Component.literal(text.toString()).withStyle(ChatFormatting.GRAY));
+        if (loaded.errorCount() > 0) {
+            message.append(Component.literal(" — " + loaded.errorCount() + " config error(s), see log")
+                    .withStyle(ChatFormatting.RED));
+        }
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (player.hasPermissions(2)) {
+                player.sendSystemMessage(message);
+            }
+        }
+    }
+}
