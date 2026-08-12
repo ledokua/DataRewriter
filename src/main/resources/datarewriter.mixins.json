@@ -4,6 +4,8 @@
   "package": "net.ledok.datarewriter.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "RecipeManagerMixin",
+    "SimpleJsonResourceReloadListenerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
