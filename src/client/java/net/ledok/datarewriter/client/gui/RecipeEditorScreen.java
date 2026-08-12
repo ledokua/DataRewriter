@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.mojang.serialization.JsonOps;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.ledok.datarewriter.network.SaveRecipePayload;
 import net.minecraft.ChatFormatting;
@@ -16,23 +17,28 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.ledok.datarewriter.menu.EditorMenu;
 import net.minecraft.world.inventory.ClickType;
-import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.level.material.Fluid;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static net.ledok.datarewriter.client.gui.EditorLayout.FieldDef;
 import static net.ledok.datarewriter.client.gui.EditorLayout.Kind;
@@ -44,7 +50,7 @@ import static net.ledok.datarewriter.client.gui.EditorLayout.SlotFormat;
  * ghost slots; the finished recipe is sent to the server, which validates it
  * and appends it to a normal DataRewriter config file (op only).
  */
-public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScreen.EditorMenu> {
+public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     private final List<EditorLayout> layouts;
     private EditorLayout layout;
 
@@ -80,6 +86,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
     private int uiRight;
     private int uiBottom;
 
+    /** True when the layout's texture actually resolves — else the card panel is drawn. */
+    private boolean texturePresent;
+
     private record FieldLabel(Component text, int x, int y) {
     }
 
@@ -90,7 +99,12 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
     }
 
     public RecipeEditorScreen() {
-        super(new EditorMenu(), Minecraft.getInstance().player.getInventory(),
+        // EMI (and REI/JEI) only attach their overlays to container screens,
+        // so the editor is one — with a slot-less, client-only menu that never
+        // talks to the server (all container packet paths are neutralized
+        // below).
+        super(new EditorMenu(0, Minecraft.getInstance().player.getInventory()),
+                Minecraft.getInstance().player.getInventory(),
                 Component.literal("Recipe Editor"));
         this.layouts = EditorLayouts.loadAll();
         EditorLayout remembered = null;
@@ -102,29 +116,6 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
         }
         this.layout = remembered != null ? remembered : layouts.getFirst();
         lastTypeId = this.layout.typeId;
-    }
-
-    /**
-     * EMI (and REI/JEI) only attach their overlays to container screens, so
-     * the editor is one — with a slot-less, client-only menu that never talks
-     * to the server (all container packet paths are neutralized below).
-     */
-    public static class EditorMenu extends AbstractContainerMenu {
-        EditorMenu() {
-            // A registered type, not null: EMI calls getType() when looking up
-            // recipe handlers, and vanilla throws for null-type menus.
-            super(MenuType.GENERIC_9x1, 0);
-        }
-
-        @Override
-        public ItemStack quickMoveStack(Player player, int index) {
-            return ItemStack.EMPTY;
-        }
-
-        @Override
-        public boolean stillValid(Player player) {
-            return true;
-        }
     }
 
     private String[] refs() {
@@ -171,6 +162,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
     protected void init() {
         super.init();
         fieldLabels.clear();
+        assert minecraft != null;
+        texturePresent = layout.texture != null
+                && minecraft.getResourceManager().getResource(layout.texture).isPresent();
         if (layout.fullGui()) {
             initFullGui();
         } else {
@@ -398,7 +392,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
         graphics.drawCenteredString(font, title, width / 2, Math.max(2, uiTop - 12), 0xFFFFFF);
-        if (layout.texture != null) {
+        if (texturePresent) {
             graphics.blit(layout.texture, panelLeft, panelTop, layout.u, layout.v, layout.width, layout.height);
         } else {
             renderGenericPanel(graphics);
@@ -411,7 +405,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
             SlotDef slot = layout.slots.get(i);
             int x = slotX(slot);
             int y = slotY(slot);
-            if (layout.texture != null && slot.format().fluid()) {
+            if (texturePresent && slot.format().fluid()) {
                 // Fluid ghosts sit on tank graphics, not real item slots, so
                 // give them a visible socket.
                 graphics.fill(x - 1, y - 1, x + 17, y + 17, 0xFFFFFFFF);
@@ -487,7 +481,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
             int[] pos = invPos(i);
             int x = pos[0];
             int y = pos[1];
-            if (layout.texture == null) { // textures already have slot graphics
+            if (!texturePresent) { // textures already have slot graphics
                 graphics.fill(x - 1, y - 1, x + 17, y + 17, 0xFFFFFFFF);
                 graphics.fill(x - 1, y - 1, x + 16, y + 16, 0xFF373737);
                 graphics.fill(x, y, x + 16, y + 16, 0xFF8B8B8B);
@@ -611,8 +605,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
         }
         if (slot.format().counted && layout.kind == Kind.SLOTS) {
             lines.add(Component.literal(slot.format().fluid()
-                    ? "Scroll: ±100 mB (Shift ±10, Ctrl ±1000)"
-                    : "Scroll to change the count").withStyle(ChatFormatting.GRAY));
+                    ? "Scroll: ±100 mB (Shift ±10, Ctrl ±1000) — middle-click to type"
+                    : "Scroll or middle-click to set the count").withStyle(ChatFormatting.GRAY));
         }
         if (slot.chanceable()) {
             lines.add(Component.literal("Alt+Scroll: chance ±5% (Shift ±1%)")
@@ -665,6 +659,18 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
         SlotDef slot = layout.slots.get(index);
         if (button == 1) {
             refs()[index] = null;
+            return true;
+        }
+        if (button == 2 && refs()[index] != null && slot.format().counted
+                && !(layout.kind != Kind.SLOTS && !slot.result())) {
+            // Middle-click: type an exact amount instead of scrolling.
+            assert minecraft != null;
+            final int slotIndex = index;
+            boolean fluid = slot.format().fluid();
+            minecraft.setScreen(new AmountInputScreen(this,
+                    Component.literal(slotLabel(slot) + (fluid ? " (mB)" : " (count)")),
+                    counts()[index], 1, fluid ? 1_000_000 : 99,
+                    amount -> counts()[slotIndex] = amount));
             return true;
         }
         if (button == 0) {
@@ -999,6 +1005,257 @@ public class RecipeEditorScreen extends AbstractContainerScreen<RecipeEditorScre
             obj.addProperty("item", ref);
         }
         return obj;
+    }
+
+    /**
+     * Fills the editor from an existing recipe — the reverse of saving. Used
+     * by EMI's recipe-fill button. Encodes the recipe with the real codec and
+     * maps the JSON back through the layout's slot/field paths; the id box is
+     * set to the recipe's id, so saving unchanged replaces it.
+     */
+    public boolean loadRecipe(RecipeHolder<?> holder) {
+        assert minecraft != null;
+        if (minecraft.level == null) {
+            return false;
+        }
+        JsonElement encoded;
+        try {
+            encoded = Recipe.CODEC.encodeStart(RegistryOps.create(JsonOps.INSTANCE,
+                    minecraft.level.registryAccess()), holder.value()).result().orElse(null);
+        } catch (Exception e) {
+            encoded = null;
+        }
+        if (!(encoded instanceof JsonObject json)
+                || !(json.get("type") instanceof JsonPrimitive typeValue)) {
+            // Network-synced shaped recipes lose their pattern/key data and
+            // cannot be re-encoded ("Cannot encode unpacked recipe") — rebuild
+            // the grid from the parsed recipe instead.
+            ResourceLocation serializer = BuiltInRegistries.RECIPE_SERIALIZER
+                    .getKey(holder.value().getSerializer());
+            if (holder.value() instanceof ShapedRecipe shaped && serializer != null
+                    && serializer.toString().equals("minecraft:crafting_shaped")) {
+                return loadShapedParsed(holder, shaped);
+            }
+            return false;
+        }
+        String typeId = typeValue.getAsString();
+        EditorLayout target = null;
+        for (EditorLayout candidate : layouts) {
+            if (candidate.typeId.equals(typeId)) {
+                target = candidate;
+                break;
+            }
+        }
+        if (target == null) {
+            return false;
+        }
+        layout = target;
+        lastTypeId = typeId;
+        clearSlots();
+        FIELDS_BY_TYPE.remove(typeId);
+
+        String[] refs = refs();
+        int[] counts = counts();
+        int[] chances = chances();
+        switch (layout.kind) {
+            case SHAPED -> loadShaped(json, refs);
+            case SHAPELESS -> loadShapeless(json, refs);
+            case SLOTS -> {
+            }
+        }
+
+        Map<String, Integer> cursors = new HashMap<>();
+        Set<String> consumed = new HashSet<>();
+        for (int i = 0; i < layout.slots.size(); i++) {
+            SlotDef slot = layout.slots.get(i);
+            if (layout.kind != Kind.SLOTS && !slot.result()) {
+                continue;
+            }
+            boolean array = slot.path().endsWith("[]");
+            if (!array && consumed.contains(slot.path())) {
+                continue; // an either/or path already claimed by another slot
+            }
+            JsonElement value = getAtPath(json, slot.path(), cursors);
+            Parsed parsed = value == null ? null : parseAny(value);
+            if (parsed == null || parsed.fluidLike() != slot.format().fluid()) {
+                continue;
+            }
+            refs[i] = parsed.ref();
+            if (parsed.count() > 0) {
+                counts[i] = Math.max(1, Math.min(slot.format().fluid() ? 1_000_000 : 99, parsed.count()));
+            }
+            if (slot.chanceable() && parsed.chance() > 0) {
+                chances[i] = Math.max(1, Math.min(100, Math.round(parsed.chance() * 100)));
+            }
+            if (!array) {
+                consumed.add(slot.path());
+            }
+        }
+
+        Map<String, String> values = fieldValues();
+        Map<String, Integer> fieldCursors = new HashMap<>();
+        for (FieldDef field : layout.fields) {
+            if (getAtPath(json, field.path(), fieldCursors) instanceof JsonPrimitive p) {
+                values.put(field.path(), p.getAsString());
+            }
+        }
+
+        idText = holder.id().toString();
+        status = Component.literal("Loaded " + holder.id() + " — save to replace it.")
+                .withStyle(ChatFormatting.GREEN);
+        rebuildWidgets();
+        return true;
+    }
+
+    /** Fills the crafting grid from an already-parsed shaped recipe (no JSON round-trip). */
+    private boolean loadShapedParsed(RecipeHolder<?> holder, ShapedRecipe shaped) {
+        assert minecraft != null && minecraft.level != null;
+        EditorLayout target = null;
+        for (EditorLayout candidate : layouts) {
+            if (candidate.typeId.equals("minecraft:crafting_shaped")) {
+                target = candidate;
+                break;
+            }
+        }
+        if (target == null) {
+            return false;
+        }
+        layout = target;
+        lastTypeId = layout.typeId;
+        clearSlots();
+
+        String[] refs = refs();
+        int[] counts = counts();
+        int width = shaped.getWidth();
+        int height = shaped.getHeight();
+        List<Ingredient> ingredients = shaped.getIngredients();
+        for (int row = 0; row < Math.min(3, height); row++) {
+            for (int col = 0; col < Math.min(3, width); col++) {
+                // Tag ingredients arrive from the server pre-expanded, so the
+                // first matching item stands in for the tag.
+                ItemStack[] options = ingredients.get(row * width + col).getItems();
+                if (options.length > 0) {
+                    refs[row * 3 + col] = BuiltInRegistries.ITEM.getKey(options[0].getItem()).toString();
+                }
+            }
+        }
+        ItemStack result = shaped.getResultItem(minecraft.level.registryAccess());
+        for (int i = 0; i < layout.slots.size(); i++) {
+            if (layout.slots.get(i).result() && !result.isEmpty()) {
+                refs[i] = BuiltInRegistries.ITEM.getKey(result.getItem()).toString();
+                counts[i] = Math.max(1, Math.min(99, result.getCount()));
+            }
+        }
+
+        idText = holder.id().toString();
+        status = Component.literal("Loaded " + holder.id() + " — save to replace it.")
+                .withStyle(ChatFormatting.GREEN);
+        rebuildWidgets();
+        return true;
+    }
+
+    private void loadShaped(JsonObject json, String[] refs) {
+        if (!(json.get("key") instanceof JsonObject key)
+                || !(json.get("pattern") instanceof JsonArray pattern)) {
+            return;
+        }
+        Map<Character, String> byLetter = new HashMap<>();
+        for (String letter : key.keySet()) {
+            Parsed parsed = parseAny(key.get(letter));
+            if (parsed != null && !letter.isEmpty()) {
+                byLetter.put(letter.charAt(0), parsed.ref());
+            }
+        }
+        for (int row = 0; row < Math.min(3, pattern.size()); row++) {
+            String line = pattern.get(row).getAsString();
+            for (int col = 0; col < Math.min(3, line.length()); col++) {
+                refs[row * 3 + col] = byLetter.get(line.charAt(col));
+            }
+        }
+    }
+
+    private void loadShapeless(JsonObject json, String[] refs) {
+        if (!(json.get("ingredients") instanceof JsonArray ingredients)) {
+            return;
+        }
+        for (int i = 0; i < Math.min(9, ingredients.size()); i++) {
+            Parsed parsed = parseAny(ingredients.get(i));
+            if (parsed != null) {
+                refs[i] = parsed.ref();
+            }
+        }
+    }
+
+    /** Reads a value at a dotted path; "[]" paths consume array entries in order via {@code cursors}. */
+    private static JsonElement getAtPath(JsonObject root, String path, Map<String, Integer> cursors) {
+        String[] parts = path.split("\\.");
+        JsonObject current = root;
+        for (int i = 0; i < parts.length - 1; i++) {
+            if (current.get(parts[i]) instanceof JsonObject next) {
+                current = next;
+            } else {
+                return null;
+            }
+        }
+        String last = parts[parts.length - 1];
+        if (last.endsWith("[]")) {
+            String name = last.substring(0, last.length() - 2);
+            if (!(current.get(name) instanceof JsonArray array)) {
+                return null;
+            }
+            int index = cursors.merge(path, 1, Integer::sum) - 1;
+            return index < array.size() ? array.get(index) : null;
+        }
+        return current.get(last);
+    }
+
+    private record Parsed(String ref, int count, float chance, boolean fluidLike) {
+    }
+
+    /** Best-effort extraction of (ref, amount, chance) from the shapes recipes use. */
+    private static Parsed parseAny(JsonElement value) {
+        if (value instanceof JsonPrimitive p && p.isString()) {
+            return new Parsed(p.getAsString(), 0, 0, false);
+        }
+        if (value instanceof JsonArray array) {
+            return array.isEmpty() ? null : parseAny(array.get(0));
+        }
+        if (!(value instanceof JsonObject obj)) {
+            return null;
+        }
+        boolean fluidLike = obj.has("amount") || obj.has("amount_mb") || obj.has("fluid");
+        int count = intOf(obj, "count", intOf(obj, "amount", intOf(obj, "amount_mb", 0)));
+        float chance = obj.get("chance") instanceof JsonPrimitive c && c.isNumber() ? c.getAsFloat() : 0;
+        String ref = null;
+        if (obj.get("id") instanceof JsonPrimitive p && p.isString()) {
+            ref = p.getAsString();
+        } else if (obj.get("fluid") instanceof JsonPrimitive p && p.isString()) {
+            ref = p.getAsString();
+        } else if (obj.get("item") instanceof JsonPrimitive p && p.isString()) {
+            ref = p.getAsString();
+        } else if (obj.get("tag") instanceof JsonPrimitive p && p.isString()) {
+            String tag = p.getAsString();
+            ref = tag.startsWith("#") ? tag : "#" + tag;
+        } else if (obj.get("item") instanceof JsonObject inner) {
+            Parsed nested = parseAny(inner);
+            if (nested != null) {
+                ref = nested.ref();
+                if (count == 0) {
+                    count = nested.count();
+                }
+            }
+        } else if (obj.has("ingredient")) {
+            Parsed nested = parseAny(obj.get("ingredient"));
+            if (nested != null) {
+                ref = nested.ref();
+                fluidLike |= nested.fluidLike();
+            }
+        }
+        return ref == null ? null : new Parsed(ref, count, chance, fluidLike);
+    }
+
+    private static int intOf(JsonObject obj, String key, int fallback) {
+        return obj.get(key) instanceof JsonPrimitive p && p.isNumber() ? p.getAsInt() : fallback;
     }
 
     /** Sets a value at a dotted path; a trailing "[]" appends to an array. */

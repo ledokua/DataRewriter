@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.JsonReader;
 import net.fabricmc.loader.api.FabricLoader;
 import net.ledok.datarewriter.Datarewriter;
@@ -28,6 +29,16 @@ import static net.ledok.datarewriter.client.gui.EditorLayout.SlotFormat;
 
 /** Built-in vanilla layouts plus user layouts from config/datarewriter/editor-layouts/. */
 public final class EditorLayouts {
+    /**
+     * Recipe types hidden from the editor: not real data-driven recipes
+     * (dynamic matchers / dummy data carriers), so creating them would only
+     * confuse. Users can extend this with { type: "...", hidden: true }
+     * entries in their layout files.
+     */
+    private static final Set<String> HIDDEN_TYPES = Set.of(
+            "herbalbrews:cauldron_brewing" // matches() is always false; one dummy recipe ships
+    );
+
     private EditorLayouts() {
     }
 
@@ -38,6 +49,7 @@ public final class EditorLayouts {
      */
     public static List<EditorLayout> loadAll() {
         List<EditorLayout> layouts = new ArrayList<>(builtIns());
+        Set<String> hidden = new HashSet<>(HIDDEN_TYPES);
 
         Path dir = FabricLoader.getInstance().getConfigDir()
                 .resolve(Datarewriter.MOD_ID).resolve("editor-layouts");
@@ -55,14 +67,15 @@ public final class EditorLayouts {
                         .sorted()
                         .toList();
                 for (Path file : files) {
-                    loadFile(file, layouts);
+                    loadFile(file, layouts, hidden);
                 }
             }
         } catch (IOException e) {
             Datarewriter.LOGGER.error("Could not read editor layouts from {}", dir, e);
         }
 
-        Set<String> knownTypes = new HashSet<>();
+        layouts.removeIf(layout -> hidden.contains(layout.typeId));
+        Set<String> knownTypes = new HashSet<>(hidden);
         for (EditorLayout layout : layouts) {
             knownTypes.add(layout.typeId);
         }
@@ -77,7 +90,7 @@ public final class EditorLayouts {
         return layouts;
     }
 
-    private static void loadFile(Path file, List<EditorLayout> layouts) {
+    private static void loadFile(Path file, List<EditorLayout> layouts, Set<String> hidden) {
         String fileName = file.getFileName().toString();
         try {
             String content = ConfigLoader.stripCommentsAndTrailingCommas(Files.readString(file));
@@ -90,6 +103,14 @@ public final class EditorLayouts {
             for (JsonElement entry : entries) {
                 if (!(entry instanceof JsonObject obj)) {
                     Datarewriter.LOGGER.error("[{}] editor layout entries must be objects", fileName);
+                    continue;
+                }
+                if (obj.get("hidden") instanceof JsonPrimitive p && p.isBoolean() && p.getAsBoolean()) {
+                    if (obj.get("type") instanceof JsonPrimitive type && type.isString()) {
+                        hidden.add(type.getAsString());
+                    } else {
+                        Datarewriter.LOGGER.error("[{}] a 'hidden' entry needs a 'type'", fileName);
+                    }
                     continue;
                 }
                 layouts.add(EditorLayout.fromJson(obj));
@@ -182,6 +203,10 @@ public final class EditorLayouts {
             // Add "tags": true to also allow #tags where the format normally
             // doesn't (fluid formats then write {"tag": id} instead of {"id": id})
             // — only do this if the recipe type actually accepts a tag there.
+            //
+            // An entry of just { type: "somemod:sometype", hidden: true } removes
+            // that recipe type from the editor entirely (useful for dynamic or
+            // dummy recipe types that can't sensibly be created).
             // "field" paths support nesting ("result.item") and arrays ("ingredients[]").
             //
             // If the texture is a full 176x166 container GUI, add "inventory_y": 84

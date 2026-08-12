@@ -154,11 +154,12 @@ Rules AND-combine `id` (wildcards allowed) and `mod`, like recipe rules. Additio
 If the mod is installed on your **client** too, you can create recipes visually instead of writing JSON: run `/recipeeditor` while in a world.
 
 - Click the type button at the top to open a searchable list of every recipe type the editor knows; picking one draws that station's own GUI (crafting table, furnace, smithing table, …) or a generic panel for auto-detected modded types. Full station GUIs show your inventory in its normal place, like the real screen.
-- **Native support** ships for known mods (shown automatically when the mod is installed): Farmer's Delight Refabricated (cooking pot, cutting board — Alt+scroll a result to set its drop chance), Brewin' and Chewin' (keg fermenting, keg pouring, distilling — fluid amounts always saved in millibuckets, so recipes behave the same on every loader), and [Let's Do] Vinery (fermentation barrel with juice type/amount fields, apple press mashing & fermenting).
+- **Native support** ships for known mods (shown automatically when the mod is installed): Farmer's Delight Refabricated (cooking pot, cutting board — Alt+scroll a result to set its drop chance), Brewin' and Chewin' (keg fermenting, keg pouring, distilling — fluid amounts always saved in millibuckets, so recipes behave the same on every loader), [Let's Do] Vinery (fermentation barrel with juice type/amount fields, apple press mashing & fermenting), and [Let's Do] Herbal Brews (tea kettle; its dummy cauldron type is hidden).
 - Hover a text field to see the values existing recipes actually use for it (e.g. which `unit` strings a mod accepts) — collected automatically from all loaded recipes of that type.
 - Click a highlighted slot to choose an item from a searchable list (type `#` to search **tags** — item tags, or fluid tags on slots that accept them); right-click clears a slot. For slot types that support amounts, scroll the mouse wheel over the slot to change the count; where a recipe supports per-result chances, Alt+scroll sets them.
 - Your **inventory** is shown in the editor — click an item to pick it up, then click it into as many slots as you like (right-click drops it), or just drag it onto a slot. Buckets dropped on fluid slots become their fluid.
-- With **EMI** installed, its panels show up next to the editor and you can drag any item or fluid from them straight into a slot, like an AE2 pattern terminal — compatible slots light up green while dragging. (Optional; nothing is required at runtime.)
+- With **EMI** installed, its panels show up next to the editor and you can drag any item or fluid from them straight into a slot, like an AE2 pattern terminal — compatible slots light up green while dragging. Even better: open any recipe in EMI and click its **fill (+) button** to load that recipe into the editor — slots, amounts, chances, fields, and the id, ready to tweak and save (which replaces the original; clear the id to save a copy instead). (Optional; nothing is required at runtime.)
+- Middle-click a filled slot to **type an exact amount** (count or mB) instead of scrolling.
 - Optionally give the recipe an id (an existing id **replaces** that recipe), fill in any extra fields (XP, cooking time, …), and hit **Save recipe**. The editor stays open, so you can keep making recipes; **Clear** empties the current pattern.
 - Closing and reopening the editor brings back your last recipe type, slot contents, amounts, and field values (kept until the game quits).
 
@@ -210,6 +211,8 @@ Optionally, add the mod's own GUI for the authentic look:
 - Slots also take `chance: true` (Alt+scroll sets a drop chance, written as a `chance` key) and `tags: true` (allow `#tags` beyond what the format permits — fluid formats then write `{tag}` instead of `{id}`; only use where the recipe type accepts it).
 - Add `inventory_y: 84` to show the player inventory inside the panel like a real container screen — with a full 176×166 GUI texture, or without any texture (the editor draws a clean recipe-card panel).
 - `fields` become text boxes: `type` is `int`, `float`, `string` or `bool`; `required: true` blocks saving while empty; an optional `suggestions: ["a", "b"]` list is shown as a tooltip (auto layouts fill this from existing recipes).
+
+An entry of just `{ type: "somemod:sometype", hidden: true }` removes that recipe type from the editor entirely — for dynamic or dummy recipe types that can't sensibly be created.
 
 A commented example is generated at `config/datarewriter/editor-layouts/example.json5` on first use, and the files are re-read every time the editor opens, so you can tweak a layout and just reopen the screen.
 

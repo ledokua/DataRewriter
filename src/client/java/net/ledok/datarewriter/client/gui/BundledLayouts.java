@@ -43,6 +43,9 @@ final class BundledLayouts {
         if (typeExists("brewinandchewin:distilling")) {
             layouts.add(bncDistilling());
         }
+        if (typeExists("herbalbrews:kettle_brewing")) {
+            layouts.add(hbKettleBrewing());
+        }
         if (typeExists("vinery:wine_fermentation")) {
             layouts.add(vineryWineFermentation());
         }
@@ -111,16 +114,20 @@ final class BundledLayouts {
                 null, 0, 0, 176, 166, 84, Kind.SLOTS, slots, List.of());
     }
 
+    private static ResourceLocation bncTexture(String name) {
+        return ResourceLocation.fromNamespaceAndPath("brewinandchewin", "textures/gui/" + name + ".png");
+    }
+
     /**
-     * Keg fermenting, laid out like EMI's recipe view: base fluid on the
-     * left, the 2x2 ingredient grid, then a result that is EITHER a fluid
-     * (upper right slot) or an item (lower right slot) — fill exactly one.
-     * Units are always written as millibuckets; omitting the unit would mean
-     * droplets on Fabric.
+     * Keg fermenting on the keg GUI: base fluid in the free band left of the
+     * 2x2 ingredient grid, then a result that is EITHER a fluid (in the tank)
+     * or an item (the tankard output slot) — fill exactly one. Units are
+     * always written as millibuckets; omitting the unit would mean droplets
+     * on Fabric.
      */
     private static EditorLayout bncFermenting() {
         List<SlotDef> slots = new ArrayList<>();
-        slots.add(new SlotDef(14, 25, "base_fluid", SlotFormat.FLUID_AMOUNT, false, false, false, true,
+        slots.add(new SlotDef(13, 26, "base_fluid", SlotFormat.FLUID_AMOUNT, false, false, false, true,
                 (ref, amount, chance) -> {
                     JsonObject ingredient = new JsonObject();
                     if (ref.startsWith("#")) {
@@ -136,14 +143,14 @@ final class BundledLayouts {
                 }));
         for (int row = 0; row < 2; row++) {
             for (int col = 0; col < 2; col++) {
-                slots.add(new SlotDef(44 + col * 18, 16 + row * 18, "ingredients[]",
+                slots.add(new SlotDef(39 + col * 18, 17 + row * 18, "ingredients[]",
                         SlotFormat.INGREDIENT, false, row == 0 && col == 0));
             }
         }
-        slots.add(new SlotDef(140, 16, "result", SlotFormat.FLUID_AMOUNT, true, false));
-        slots.add(new SlotDef(140, 34, "result", SlotFormat.ITEM, true, false));
+        slots.add(new SlotDef(124, 25, "result", SlotFormat.FLUID_AMOUNT, true, false));
+        slots.add(new SlotDef(124, 55, "result", SlotFormat.ITEM, true, false));
         return new EditorLayout("brewinandchewin:fermenting", "Keg Fermenting (Brewin' and Chewin')",
-                null, 0, 0, 176, 166, 84, Kind.SLOTS, slots,
+                bncTexture("keg"), 0, 0, 176, 166, 84, Kind.SLOTS, slots,
                 List.of(new FieldDef("unit", "Unit", FieldType.STRING, "millibuckets",
                                 true, List.of("liters", "millibuckets", "droplets")),
                         new FieldDef("category", "Category", FieldType.STRING, "drinks",
@@ -153,18 +160,47 @@ final class BundledLayouts {
                         new FieldDef("temperature", "Temperature", FieldType.INT, "3", false)));
     }
 
-    /** Keg pouring: tank fluid + optional container item -> output item. */
+    /**
+     * Keg pouring on the keg GUI, matching the machine 1:1: tank fluid +
+     * optional container in the tankard slot -> output item.
+     */
     private static EditorLayout bncKegPouring() {
         List<SlotDef> slots = List.of(
-                new SlotDef(14, 25, "fluid", SlotFormat.FLUID_AMOUNT, false, true),
-                new SlotDef(53, 25, "container", SlotFormat.ITEM, false, false),
-                new SlotDef(140, 25, "output", SlotFormat.ITEM, true, true));
+                new SlotDef(124, 25, "fluid", SlotFormat.FLUID_AMOUNT, false, true),
+                new SlotDef(91, 55, "container", SlotFormat.ITEM, false, false),
+                new SlotDef(124, 55, "output", SlotFormat.ITEM, true, true));
         return new EditorLayout("brewinandchewin:keg_pouring", "Keg Pouring (Brewin' and Chewin')",
-                null, 0, 0, 176, 166, 84, Kind.SLOTS, slots,
+                bncTexture("keg"), 0, 0, 176, 166, 84, Kind.SLOTS, slots,
                 List.of(new FieldDef("unit", "Unit", FieldType.STRING, "millibuckets",
                                 true, List.of("liters", "millibuckets", "droplets")),
                         new FieldDef("strict", "Strict", FieldType.BOOL, "false", false),
                         new FieldDef("can_fill", "Can fill", FieldType.BOOL, "true", false)));
+    }
+
+    /**
+     * Tea kettle: 2x2 ingredients + the container (bottle) slot — the mod
+     * matches the container as a fifth ingredient, so it maps to
+     * "ingredients[]" too. Water/heat slots are machine fuel, not recipe
+     * data; the recipe's fluid/heat requirements are plain int fields.
+     */
+    private static EditorLayout hbKettleBrewing() {
+        List<SlotDef> slots = new ArrayList<>();
+        slots.add(new SlotDef(13, 12, "ingredients[]", SlotFormat.INGREDIENT, false, true));
+        slots.add(new SlotDef(31, 12, "ingredients[]", SlotFormat.INGREDIENT, false, false));
+        slots.add(new SlotDef(13, 30, "ingredients[]", SlotFormat.INGREDIENT, false, false));
+        slots.add(new SlotDef(31, 30, "ingredients[]", SlotFormat.INGREDIENT, false, false));
+        slots.add(new SlotDef(31, 52, "ingredients[]", SlotFormat.INGREDIENT, false, false));
+        slots.add(new SlotDef(91, 22, "result", SlotFormat.ITEM, true, true));
+        return new EditorLayout("herbalbrews:kettle_brewing", "Tea Kettle (Herbal Brews)",
+                ResourceLocation.fromNamespaceAndPath("herbalbrews", "textures/gui/tea_kettle.png"),
+                0, 0, 176, 166, 84, Kind.SLOTS, slots,
+                List.of(new FieldDef("effect", "Effect", FieldType.STRING, "herbalbrews:balanced",
+                                true, List.of("herbalbrews:balanced", "herbalbrews:deeprush")),
+                        new FieldDef("effect_duration", "Duration", FieldType.INT, "1800", true),
+                        new FieldDef("fluid_amount", "Water", FieldType.INT, "10", true),
+                        new FieldDef("heat_amount", "Heat", FieldType.INT, "40", true),
+                        new FieldDef("crafting_duration", "Time (ticks)", FieldType.INT, "20", true),
+                        new FieldDef("experience", "XP", FieldType.FLOAT, "0.8", true)));
     }
 
     private static final List<String> JUICE_TYPES = List.of(
@@ -190,13 +226,17 @@ final class BundledLayouts {
                         new FieldDef("wine_bottle.required", "Needs bottle", FieldType.BOOL, "true", true)));
     }
 
-    /** Apple press, mashing step: single input -> output. */
+    /**
+     * Apple press, mashing step: single input -> output. The mash lands in
+     * the first bottom-right slot (which then feeds the fermenting step), not
+     * the top result slot.
+     */
     private static EditorLayout vineryAppleMashing() {
         return new EditorLayout("vinery:apple_mashing", "Apple Press — Mashing (Vinery)",
                 ResourceLocation.fromNamespaceAndPath("vinery", "textures/gui/apple_press_gui.png"),
                 0, 0, 176, 166, 84, Kind.SLOTS,
                 List.of(new SlotDef(44, 34, "input", SlotFormat.INGREDIENT, false, true),
-                        new SlotDef(119, 18, "output", SlotFormat.ITEM, true, true)),
+                        new SlotDef(101, 50, "output", SlotFormat.ITEM, true, true)),
                 List.of());
     }
 
@@ -210,13 +250,17 @@ final class BundledLayouts {
                 List.of(new FieldDef("wine_bottle.required", "Needs bottle", FieldType.BOOL, "true", true)));
     }
 
-    /** Distillery: single ingredient -> item result. */
+    /**
+     * Distillery GUI: input top-left, output right (fuel and water slots are
+     * machine supplies, not recipe data). Falls back to the card panel if the
+     * texture is absent (it is referenced but missing in some BnC builds).
+     */
     private static EditorLayout bncDistilling() {
         List<SlotDef> slots = List.of(
-                new SlotDef(53, 25, "ingredient", SlotFormat.INGREDIENT, false, true),
-                new SlotDef(140, 25, "result", SlotFormat.ITEM, true, true));
+                new SlotDef(44, 17, "ingredient", SlotFormat.INGREDIENT, false, true),
+                new SlotDef(116, 35, "result", SlotFormat.ITEM, true, true));
         return new EditorLayout("brewinandchewin:distilling", "Distilling (Brewin' and Chewin')",
-                null, 0, 0, 176, 166, 84, Kind.SLOTS, slots,
+                bncTexture("distillery"), 0, 0, 176, 166, 84, Kind.SLOTS, slots,
                 List.of(new FieldDef("distilling_time", "Time (ticks)", FieldType.INT, "400", false),
                         new FieldDef("water_cost", "Water", FieldType.INT, "1", false),
                         new FieldDef("experience", "XP", FieldType.FLOAT, "0.0", false)));
