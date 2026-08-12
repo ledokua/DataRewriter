@@ -3,6 +3,7 @@ package net.ledok.datarewriter;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.ledok.datarewriter.command.ListCommand;
+import net.ledok.datarewriter.network.RecipeSaveNetworking;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,6 +14,7 @@ public class Datarewriter implements ModInitializer {
     @Override
     public void onInitialize() {
         ListCommand.register();
+        RecipeSaveNetworking.register();
         // Rules matching by output/input/type need parsed recipes and bound tags,
         // which are only available once the data reload has fully finished.
         ServerLifecycleEvents.SERVER_STARTED.register(RecipeRewriter::applyParsedRules);

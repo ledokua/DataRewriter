@@ -48,9 +48,13 @@ public final class ConfigLoader {
         List<RewriteConfig.AddedLootTable> lootAdditions = new ArrayList<>();
         List<RewriteConfig.LootModification> lootModifications = new ArrayList<>();
 
+        // editor-layouts/ holds the recipe editor's CLIENT-side layout files,
+        // which are not rewrite rules.
+        Path editorLayouts = dir.resolve("editor-layouts");
         try (Stream<Path> stream = Files.walk(dir)) {
             List<Path> files = stream
                     .filter(Files::isRegularFile)
+                    .filter(p -> !p.startsWith(editorLayouts))
                     .filter(p -> {
                         String name = p.getFileName().toString();
                         return name.endsWith(".json") || name.endsWith(".json5");
@@ -384,7 +388,7 @@ public final class ConfigLoader {
         return isTag ? "#" + id : id.toString();
     }
 
-    private static String sanitizePath(String s) {
+    static String sanitizePath(String s) {
         return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9/._-]", "_");
     }
 
@@ -392,7 +396,7 @@ public final class ConfigLoader {
      * Removes // and /* *&#47; comments and trailing commas so the result is
      * plain JSON. String contents are left untouched.
      */
-    static String stripCommentsAndTrailingCommas(String text) {
+    public static String stripCommentsAndTrailingCommas(String text) {
         StringBuilder out = new StringBuilder(text.length());
         boolean inString = false;
         char quote = 0;

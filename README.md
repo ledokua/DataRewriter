@@ -1,10 +1,11 @@
 # DataRewriter
 
-A lightweight, **server-side only** Fabric mod for Minecraft **1.21.1** that removes, replaces, and adds recipes and loot tables through simple config files — inspired by KubeJS, but without a scripting engine.
+A lightweight, **server-side** Fabric mod for Minecraft **1.21.1** that removes, replaces, and adds recipes and loot tables through simple config files — inspired by KubeJS, but without a scripting engine.
 
 - Works on dedicated servers and in singleplayer. **Vanilla clients can join** — rewritten recipes reach them through normal recipe sync.
 - Changes apply on world/server start and on plain `/reload` — no restart needed while tuning.
 - Config files allow `// comments`, trailing commas, and unquoted keys.
+- Optional client side: installing the mod on your own client adds a visual [recipe editor](#recipe-editor-gui) — other players don't need it.
 
 ## Getting started
 
@@ -100,7 +101,7 @@ The easiest way to learn a mod's format: open its jar (it's a zip) and copy a re
   type: "farmersdelight:cutting",
   ingredients: [{ item: "minecraft:oak_log" }],
   tool: { tag: "c:tools/axes" },
-  result: [{ item: "minecraft:oak_planks", count: 6 }],
+  result: [{ item: { id: "minecraft:oak_planks", count: 6 } }],
 }
 ```
 
@@ -147,6 +148,70 @@ loot_tables: {
 Rules AND-combine `id` (wildcards allowed) and `mod`, like recipe rules. Additions use the vanilla loot table JSON format (same as datapacks — the [Minecraft wiki](https://minecraft.wiki/w/Loot_table) documents it fully) and **require an `id`**: use an existing id to replace that table. Replaced/added tables are never touched by your own removal rules.
 
 `modify` appends your pools to every matching table without touching its existing loot — the way RPG-style mods inject their drops everywhere. It targets like `remove` (`id` with wildcards, `mod`) and runs **after** remove/add, so it also applies to tables you added or emptied. To make an injected drop rare, weight it against a `minecraft:empty` entry like in the example, or use a `random_chance` condition on the pool.
+
+## Recipe editor GUI
+
+If the mod is installed on your **client** too, you can create recipes visually instead of writing JSON: run `/recipeeditor` while in a world.
+
+- Click the type button at the top to open a searchable list of every recipe type the editor knows; picking one draws that station's own GUI (crafting table, furnace, smithing table, …) or a generic panel for auto-detected modded types. Full station GUIs show your inventory in its normal place, like the real screen.
+- **Native support** ships for known mods (shown automatically when the mod is installed): Farmer's Delight Refabricated (cooking pot, cutting board — Alt+scroll a result to set its drop chance), Brewin' and Chewin' (keg fermenting, keg pouring, distilling — fluid amounts always saved in millibuckets, so recipes behave the same on every loader), and [Let's Do] Vinery (fermentation barrel with juice type/amount fields, apple press mashing & fermenting).
+- Hover a text field to see the values existing recipes actually use for it (e.g. which `unit` strings a mod accepts) — collected automatically from all loaded recipes of that type.
+- Click a highlighted slot to choose an item from a searchable list (type `#` to search **tags** — item tags, or fluid tags on slots that accept them); right-click clears a slot. For slot types that support amounts, scroll the mouse wheel over the slot to change the count; where a recipe supports per-result chances, Alt+scroll sets them.
+- Your **inventory** is shown in the editor — click an item to pick it up, then click it into as many slots as you like (right-click drops it), or just drag it onto a slot. Buckets dropped on fluid slots become their fluid.
+- With **EMI** installed, its panels show up next to the editor and you can drag any item or fluid from them straight into a slot, like an AE2 pattern terminal — compatible slots light up green while dragging. (Optional; nothing is required at runtime.)
+- Optionally give the recipe an id (an existing id **replaces** that recipe), fill in any extra fields (XP, cooking time, …), and hit **Save recipe**. The editor stays open, so you can keep making recipes; **Clear** empties the current pattern.
+- Closing and reopening the editor brings back your last recipe type, slot contents, amounts, and field values (kept until the game quits).
+
+Saving sends the recipe to the server (op only), where it is validated by the real recipe parser, appended to `config/datarewriter/gui-recipes.json5` — a normal config file you can edit later — and **applied immediately** to the running game (no `/reload`; the recipe is live and synced to all players the moment you save). Nothing extra is needed on other players' clients or on the server beyond the mod itself.
+
+### Modded recipe types — automatic
+
+Modded recipe types work **automatically**: the server syncs every loaded recipe to the client, so when the editor opens it takes one existing recipe of each modded type, encodes it back to JSON with the mod's own codec, and infers the editing layout from that sample — ingredient-shaped values become slots (counted ones get scroll-to-set amounts, fluids get a fluid picker), numbers/strings/booleans become fields pre-filled with the sample's values. These auto layouts draw on a generic panel and appear in the type selector as e.g. "Cutting (farmersdelight)".
+
+Two limits: a type only appears if at least one recipe of it is currently loaded (that's where the sample comes from), and the inference is heuristic — an exotic JSON shape may come out wrong or miss a field.
+
+### Editor layouts — manual override
+
+For full control — the mod's real GUI texture, exact slot positions, required flags, corrected field mappings — write a layout in `config/datarewriter/editor-layouts/*.json5` **on the client**; it replaces the auto layout for that type. In its minimal form (generic panel, auto-placed slots) a layout is just the JSON mapping:
+
+```json5
+{
+  type: "somemod:cutting",
+  name: "Cutting Board (Some Mod)",
+  slots: [
+    { field: "ingredients[]", format: "ingredient", required: true },
+    { field: "result", format: "item", result: true, required: true },
+  ],
+  fields: [
+    { field: "processing_time", label: "Time", type: "int", default: "100" },
+  ],
+}
+```
+
+(To learn a mod's recipe JSON field names, copy a real recipe from its jar — `data/<modid>/recipe/` — as the reference.)
+
+Optionally, add the mod's own GUI for the authentic look:
+
+```json5
+{
+  // ...same as above, plus:
+  texture: "somemod:textures/gui/cutting_board.png",
+  crop: [0, 0, 176, 80],            // [u, v, width, height] region of the texture
+  slots: [
+    { x: 56, y: 17, field: "ingredients[]", format: "ingredient", required: true },
+    { x: 116, y: 35, field: "result", format: "item", result: true, required: true },
+  ],
+}
+```
+
+- Slot `x`/`y` are the item positions from the mod's Menu/ScreenHandler class (the numbers passed to `new Slot(...)`); the crop offset is subtracted automatically. Without a texture, `crop` (if given) just sets the panel size.
+- `field` paths support nesting (`result.item`) and arrays (`ingredients[]` appends).
+- `format` controls the JSON written for a picked item: `string` (`"mod:item"` / `"#mod:tag"`), `ingredient` (`{item}`/`{tag}`), `counted_ingredient` (`{ingredient, count}`), `item` (`{id, count}`), `item_named` (`{item, count}`), `fluid` (`{id, amount_mb}`) or `fluid_amount` (`{id, amount}`) — the fluid formats make the picker list fluids.
+- Slots also take `chance: true` (Alt+scroll sets a drop chance, written as a `chance` key) and `tags: true` (allow `#tags` beyond what the format permits — fluid formats then write `{tag}` instead of `{id}`; only use where the recipe type accepts it).
+- Add `inventory_y: 84` to show the player inventory inside the panel like a real container screen — with a full 176×166 GUI texture, or without any texture (the editor draws a clean recipe-card panel).
+- `fields` become text boxes: `type` is `int`, `float`, `string` or `bool`; `required: true` blocks saving while empty; an optional `suggestions: ["a", "b"]` list is shown as a tooltip (auto layouts fill this from existing recipes).
+
+A commented example is generated at `config/datarewriter/editor-layouts/example.json5` on first use, and the files are re-read every time the editor opens, so you can tweak a layout and just reopen the screen.
 
 ## Finding ids in game
 

@@ -72,6 +72,30 @@ public final class RecipeRewriter {
     }
 
     /**
+     * Adds (or replaces) one already-parsed recipe in the running RecipeManager
+     * and re-syncs clients — no data reload. Used by the recipe editor; the
+     * recipe is also persisted to the config, so the next real reload produces
+     * the same state.
+     */
+    public static void applyLive(MinecraftServer server, RecipeHolder<?> holder) {
+        RecipeManager recipeManager = server.getRecipeManager();
+        List<RecipeHolder<?>> recipes = new ArrayList<>(recipeManager.getRecipes().size() + 1);
+        for (RecipeHolder<?> existing : recipeManager.getRecipes()) {
+            if (!existing.id().equals(holder.id())) {
+                recipes.add(existing);
+            }
+        }
+        recipes.add(holder);
+        recipeManager.replaceRecipes(recipes);
+        addedIds.add(holder.id());
+
+        ClientboundUpdateRecipesPacket packet = new ClientboundUpdateRecipesPacket(recipeManager.getRecipes());
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            player.connection.send(packet);
+        }
+    }
+
+    /**
      * Parsed phase. Called after server start and after /reload, once tags are
      * bound. Applies rules matching by output/input/type.
      */
