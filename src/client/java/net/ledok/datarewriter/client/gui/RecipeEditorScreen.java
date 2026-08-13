@@ -512,7 +512,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                             .withStyle(ChatFormatting.DARK_GRAY),
                     Component.literal("Click to pick up, then click any slots — right-click drops")
                             .withStyle(ChatFormatting.GRAY),
-                    Component.literal("Right-click: pick up one of its #tags instead "
+                    Component.literal("Right/middle-click: pick up one of its #tags instead "
                             + "(for slots that take tags)")
                             .withStyle(ChatFormatting.GRAY)),
                     mouseX, mouseY);
@@ -657,15 +657,15 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             return true;
         }
         int invIndex = invSlotAt(mouseX, mouseY);
-        if (invIndex >= 0 && (button == 0 || button == 1)) {
+        if (invIndex >= 0) {
             assert minecraft != null && minecraft.player != null;
             List<ItemStack> items = minecraft.player.getInventory().items;
             if (invIndex < items.size() && !items.get(invIndex).isEmpty()) {
                 if (button == 0) {
                     cursorItem = items.get(invIndex).getItem();
                 } else {
-                    // Right-click: put one of the item's #tags on the cursor
-                    // instead, for slots that accept tags.
+                    // Right- or middle-click: put one of the item's #tags on
+                    // the cursor instead, for slots that accept tags.
                     minecraft.setScreen(new ItemTagListScreen(this,
                             items.get(invIndex).getItem(), tag -> {
                         cursorTag = tag;

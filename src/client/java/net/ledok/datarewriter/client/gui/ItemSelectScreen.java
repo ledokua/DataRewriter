@@ -129,7 +129,7 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
                     .withStyle(ChatFormatting.DARK_GRAY));
             lines.add(Component.literal("Click to choose this item").withStyle(ChatFormatting.GRAY));
             if (allowTags) {
-                lines.add(Component.literal("Right-click: choose one of its #tags instead")
+                lines.add(Component.literal("Right/middle-click: choose one of its #tags instead")
                         .withStyle(ChatFormatting.GRAY));
             }
             graphics.renderComponentTooltip(font, lines, mouseX, mouseY);
@@ -140,7 +140,7 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if ((button == 0 || button == 1) && mouseX >= gridLeft && mouseX < gridLeft + COLS * 18
+        if (mouseX >= gridLeft && mouseX < gridLeft + COLS * 18
                 && mouseY >= gridTop && mouseY < gridTop + ROWS * 18) {
             int col = (int) ((mouseX - gridLeft) / 18);
             int row = (int) ((mouseY - gridTop) / 18);
@@ -151,8 +151,8 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
                 if (button == 0) {
                     deliver(BuiltInRegistries.ITEM.getKey(items.get(index).getItem()).toString());
                 } else if (allowTags) {
-                    // Right-click: pick one of this item's tags instead —
-                    // no typing tag ids by hand.
+                    // Right- or middle-click: pick one of this item's tags
+                    // instead — no typing tag ids by hand.
                     minecraft.setScreen(new ItemTagListScreen(this,
                             items.get(index).getItem(), this::deliver));
                 }
