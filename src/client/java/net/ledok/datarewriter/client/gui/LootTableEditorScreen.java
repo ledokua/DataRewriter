@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import com.mojang.serialization.JsonOps;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.ledok.datarewriter.menu.LootEditorMenu;
 import net.ledok.datarewriter.network.LootPayloads;
@@ -16,9 +17,14 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
@@ -109,6 +115,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         int chance = 100;               // percent
         boolean chanceLocked;
         JsonObject chanceCond;          // the random_chance condition we manage
+        ItemStack iconCache;            // icon with visual loot functions applied
+        String iconCacheRef;
+        boolean fancy;                  // functions change how the drop looks
     }
 
     /** A fresh 'empty' entry — a weighted chance to drop nothing. */
@@ -963,9 +972,97 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     }
 
     /** Shared with the composite sub-editor, which draws the same slots. */
+    /**
+     * The stack shown for an ITEM entry — like the drop will look in a chest:
+     * set_components / set_name / set_potion from the entry's functions are
+     * applied to the icon (display-only; saving keeps the JSON untouched).
+     */
+    static ItemStack entryIcon(EntryState entry) {
+        if (entry.kind != Kind.ITEM || entry.ref == null) {
+            return RecipeEditorScreen.iconFor(entry.ref, false);
+        }
+        if (entry.iconCache != null && entry.ref.equals(entry.iconCacheRef)) {
+            return entry.iconCache;
+        }
+        ItemStack stack = RecipeEditorScreen.iconFor(entry.ref, false).copy();
+        entry.fancy = applyVisualFunctions(stack, entry.source);
+        entry.iconCache = stack;
+        entry.iconCacheRef = entry.ref;
+        return stack;
+    }
+
+    /** Applies look-changing loot functions to the stack; true if any did. */
+    private static boolean applyVisualFunctions(ItemStack stack, JsonObject source) {
+        if (!(source.get("functions") instanceof JsonArray functions)) {
+            return false;
+        }
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) {
+            return false;
+        }
+        RegistryOps<JsonElement> ops =
+                RegistryOps.create(JsonOps.INSTANCE, minecraft.level.registryAccess());
+        boolean fancy = false;
+        for (JsonElement element : functions) {
+            if (!(element instanceof JsonObject fn)
+                    || !(fn.get("function") instanceof JsonPrimitive id && id.isString())) {
+                continue;
+            }
+            try {
+                switch (normalizeId(id.getAsString())) {
+                    case "minecraft:set_components" -> {
+                        if (fn.get("components") instanceof JsonObject components) {
+                            var patch = DataComponentPatch.CODEC.parse(ops, components).result();
+                            if (patch.isPresent()) {
+                                stack.applyComponents(patch.get());
+                                fancy = true;
+                            }
+                        }
+                    }
+                    case "minecraft:set_name" -> {
+                        if (fn.has("name")) {
+                            var name = ComponentSerialization.CODEC.parse(ops, fn.get("name")).result();
+                            if (name.isPresent()) {
+                                boolean itemName = fn.get("target") instanceof JsonPrimitive t
+                                        && t.isString() && t.getAsString().equals("item_name");
+                                stack.set(itemName ? DataComponents.ITEM_NAME
+                                        : DataComponents.CUSTOM_NAME, name.get());
+                                fancy = true;
+                            }
+                        }
+                    }
+                    case "minecraft:set_potion" -> {
+                        if (fn.get("id") instanceof JsonPrimitive potion && potion.isString()) {
+                            var holder = BuiltInRegistries.POTION.getHolder(
+                                    ResourceLocation.parse(normalizeId(potion.getAsString())));
+                            if (holder.isPresent()) {
+                                stack.set(DataComponents.POTION_CONTENTS,
+                                        new PotionContents(holder.get()));
+                                fancy = true;
+                            }
+                        }
+                    }
+                    case "minecraft:enchant_randomly", "minecraft:enchant_with_levels",
+                         "minecraft:set_enchantments" -> {
+                        // Which enchantment is random/complex — at least show
+                        // that the drop will be enchanted.
+                        stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+                        fancy = true;
+                    }
+                    default -> {
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Display-only best effort — a bad component just keeps the plain icon.
+            }
+        }
+        return fancy;
+    }
+
     static void renderEntry(GuiGraphics graphics, Font font, EntryState entry, int x, int y) {
         ItemStack icon = switch (entry.kind) {
-            case ITEM, TAG -> RecipeEditorScreen.iconFor(entry.ref, false);
+            case ITEM -> entryIcon(entry);
+            case TAG -> RecipeEditorScreen.iconFor(entry.ref, false);
             case EMPTY -> new ItemStack(Items.STRUCTURE_VOID);
             case COMPOSITE -> new ItemStack(Items.BUNDLE);
             case TABLE_REF -> new ItemStack(Items.CHEST);
@@ -1053,8 +1150,13 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
         switch (entry.kind) {
             case ITEM -> {
-                lines.add(RecipeEditorScreen.iconFor(entry.ref, false).getHoverName());
+                lines.add(entryIcon(entry).getHoverName());
                 lines.add(Component.literal(entry.ref).withStyle(ChatFormatting.DARK_GRAY));
+                if (entry.fancy) {
+                    lines.add(Component.literal("Drops with extra data (components/enchantments) "
+                            + "— shown like in game, kept exactly as-is on save.")
+                            .withStyle(ChatFormatting.GRAY));
+                }
             }
             case TAG -> {
                 lines.add(Component.literal(entry.ref).withStyle(ChatFormatting.GOLD));
@@ -1107,8 +1209,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 lines.add(Component.literal("Chance: custom formula (preserved)")
                         .withStyle(ChatFormatting.AQUA));
             } else if (entry.chance < 100) {
-                lines.add(Component.literal("Chance: " + entry.chance + "%")
-                        .withStyle(ChatFormatting.AQUA));
+                lines.add(Component.literal("Chance: " + entry.chance + "% (the blue badge) — even "
+                        + "when a roll picks this entry, it only drops this often "
+                        + "(a random_chance condition)").withStyle(ChatFormatting.AQUA));
             }
         }
         if (!pool.injected) {

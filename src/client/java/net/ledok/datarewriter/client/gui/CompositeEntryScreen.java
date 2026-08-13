@@ -156,8 +156,13 @@ public class CompositeEntryScreen extends AbstractContainerScreen<LootEditorMenu
         List<Component> lines = new ArrayList<>();
         switch (child.kind) {
             case ITEM -> {
-                lines.add(RecipeEditorScreen.iconFor(child.ref, false).getHoverName());
+                lines.add(LootTableEditorScreen.entryIcon(child).getHoverName());
                 lines.add(Component.literal(child.ref).withStyle(ChatFormatting.DARK_GRAY));
+                if (child.fancy) {
+                    lines.add(Component.literal("Drops with extra data (components/enchantments) "
+                            + "— shown like in game, kept exactly as-is on save.")
+                            .withStyle(ChatFormatting.GRAY));
+                }
             }
             case TAG -> {
                 lines.add(Component.literal(child.ref).withStyle(ChatFormatting.GOLD));
