@@ -74,7 +74,8 @@ public final class ConfigLoader {
                     .sorted()
                     .toList();
             for (Path file : files) {
-                loadFile(file, removals, additions, ingredientReplacements, lootRemovals,
+                loadFile(dir.relativize(file).toString().replace('\\', '/'), file,
+                        removals, additions, ingredientReplacements, lootRemovals,
                         lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals);
             }
         } catch (IOException e) {
@@ -105,7 +106,8 @@ public final class ConfigLoader {
         Datarewriter.LOGGER.warn(format, args);
     }
 
-    private static void loadFile(Path file, List<RewriteConfig.RemovalRule> removals,
+    private static void loadFile(String fileName, Path file,
+                                 List<RewriteConfig.RemovalRule> removals,
                                  List<RewriteConfig.AddedRecipe> additions,
                                  List<RewriteConfig.IngredientReplacement> ingredientReplacements,
                                  List<RewriteConfig.LootRule> lootRemovals,
@@ -113,7 +115,6 @@ public final class ConfigLoader {
                                  List<RewriteConfig.LootModification> lootModifications,
                                  List<RewriteConfig.LootItemReplacement> lootItemReplacements,
                                  List<RewriteConfig.LootItemRemoval> lootItemRemovals) {
-        String fileName = file.getFileName().toString();
         JsonObject root;
         try {
             String content = stripCommentsAndTrailingCommas(Files.readString(file));
@@ -694,8 +695,9 @@ public final class ConfigLoader {
 
     private static final String EXAMPLE_FILE = """
             // DataRewriter — data tweaks.
-            // Every .json / .json5 file in this folder is loaded; split rules across
-            // files however you like. Comments and trailing commas are allowed.
+            // Every .json / .json5 file in this folder is loaded, subfolders
+            // included; split rules across files and folders however you like.
+            // Comments and trailing commas are allowed.
             // Changes apply on server restart or /reload (ops get a chat summary).
             {
               recipes: {

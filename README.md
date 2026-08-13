@@ -11,7 +11,7 @@ A lightweight, **server-side** Fabric mod for Minecraft **1.21.1** that removes,
 
 Drop the jar into `mods/` on the server (Fabric API required). On first launch the mod creates `config/datarewriter/example.json5` with everything documented.
 
-**Every** `.json` / `.json5` file in `config/datarewriter/` is loaded, so split your tweaks into as many files as you like (`waystones.json5`, `vanilla-nerfs.json5`, …). Each file looks like this:
+**Every** `.json` / `.json5` file in `config/datarewriter/` is loaded — **subfolders included** (`config/datarewriter/nerfs/mobs.json5`, as deep as you like) — so split and organize your tweaks into as many files and folders as you like (`waystones.json5`, `vanilla-nerfs.json5`, …). Only `editor-layouts/` is special (client-side recipe editor layouts, not rules). Each file looks like this:
 
 ```json5
 // comments and trailing commas are fine
