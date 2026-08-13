@@ -27,6 +27,17 @@ public final class LootInjectionRewriter {
 
     /** Called from SERVER_STARTED / END_DATA_PACK_RELOAD, after loot events ran. */
     public static void apply(MinecraftServer server) {
+        try {
+            applyRules(server);
+        } catch (Throwable t) {
+            // A config convenience must never take the server down — worst
+            // case some rules only cover what the pre-parse pass reached.
+            Datarewriter.LOGGER.error("Post-load loot item pass failed — "
+                    + "#tag rules and injected-loot coverage may be incomplete", t);
+        }
+    }
+
+    private static void applyRules(MinecraftServer server) {
         RewriteConfig config = RewriteState.config();
         if (config.lootItemReplacements().isEmpty() && config.lootItemRemovals().isEmpty()) {
             return;
@@ -56,11 +67,13 @@ public final class LootInjectionRewriter {
                 .registryOrThrow(Registries.LOOT_TABLE);
         int entriesChanged = 0;
         int tablesChanged = 0;
+        int skipped = 0;
         List<Holder.Reference<LootTable>> holders = registry.holders().toList();
         for (Holder.Reference<LootTable> holder : holders) {
             ResourceLocation id = holder.key().location();
             JsonObject json = LootLiveApplier.encode(server, holder.value());
             if (json == null) {
+                skipped++; // holds mod loot entries that can't round-trip
                 continue;
             }
             int changed = 0;
@@ -96,6 +109,11 @@ public final class LootInjectionRewriter {
                     "Post-load loot item pass: changed {} entries in {} tables "
                             + "(#tag rules and runtime-injected loot)",
                     entriesChanged, tablesChanged);
+        }
+        if (skipped > 0) {
+            Datarewriter.LOGGER.info(
+                    "Post-load loot item pass: skipped {} tables whose mod loot entries "
+                            + "can't be encoded back to JSON", skipped);
         }
     }
 }

@@ -38,12 +38,19 @@ public final class LootLiveApplier {
 
     /** Validates table JSON with the vanilla loot table codec. */
     public static Parsed parse(MinecraftServer server, JsonObject tableJson) {
-        DataResult<LootTable> result = LootTable.DIRECT_CODEC.parse(
-                RegistryOps.create(JsonOps.INSTANCE, server.registryAccess()), tableJson);
-        if (result.error().isPresent()) {
-            return new Parsed("rejected by the loot table parser: " + result.error().get().message(), null);
+        try {
+            DataResult<LootTable> result = LootTable.DIRECT_CODEC.parse(
+                    RegistryOps.create(JsonOps.INSTANCE, server.registryAccess()), tableJson);
+            if (result.error().isPresent()) {
+                return new Parsed("rejected by the loot table parser: "
+                        + result.error().get().message(), null);
+            }
+            return new Parsed(null, result.result().orElseThrow());
+        } catch (Throwable t) {
+            // Badly-behaved mod codecs can throw instead of returning an
+            // error result — report it like any other rejection.
+            return new Parsed("rejected by the loot table parser: " + t, null);
         }
-        return new Parsed(null, result.result().orElseThrow());
     }
 
     /**
@@ -159,9 +166,17 @@ public final class LootLiveApplier {
 
     /** The table encoded back to JSON with the vanilla codec, or null. */
     public static JsonObject encode(MinecraftServer server, LootTable table) {
-        DataResult<JsonElement> result = LootTable.DIRECT_CODEC.encodeStart(
-                RegistryOps.create(JsonOps.INSTANCE, server.registryAccess()), table);
-        return result.result().orElse(null) instanceof JsonObject obj ? obj : null;
+        try {
+            DataResult<JsonElement> result = LootTable.DIRECT_CODEC.encodeStart(
+                    RegistryOps.create(JsonOps.INSTANCE, server.registryAccess()), table);
+            return result.result().orElse(null) instanceof JsonObject obj ? obj : null;
+        } catch (Throwable t) {
+            // Some mods' custom loot entries cannot round-trip through the
+            // codec (e.g. an entry class that claims a vanilla type and then
+            // fails the cast). Treat such tables as opaque instead of
+            // crashing whatever asked for the JSON.
+            return null;
+        }
     }
 
     /** Parse + bind + cache update in one step. Returns an error or null. */
