@@ -15,6 +15,7 @@ import net.ledok.datarewriter.client.gui.CompositeEntryScreen;
 import net.ledok.datarewriter.client.gui.ItemSelectScreen;
 import net.ledok.datarewriter.client.gui.LootTableEditorScreen;
 import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
+import net.ledok.datarewriter.client.gui.RecipeTweaksScreen;
 import net.ledok.datarewriter.menu.EditorMenu;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -98,6 +99,28 @@ public class DataRewriterEmiPlugin implements EmiPlugin {
             }
         });
         registry.addScreenBoundsProvider(ItemSelectScreen.class, screen -> {
+            int[] bounds = screen.emiScreenBounds();
+            return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
+        });
+
+        // Bulk recipe edits screen: dropping onto its from/to slots.
+        registry.addDragDropHandler(RecipeTweaksScreen.class, new EmiDragDropHandler<>() {
+            @Override
+            public boolean dropStack(RecipeTweaksScreen screen, EmiIngredient ingredient, int x, int y) {
+                Object key = firstKey(ingredient);
+                return key != null && screen.emiDrop(x, y, key);
+            }
+
+            @Override
+            public void render(RecipeTweaksScreen screen, EmiIngredient dragged,
+                               GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+                Object key = firstKey(dragged);
+                if (key != null) {
+                    screen.renderEmiDropTargets(graphics, key);
+                }
+            }
+        });
+        registry.addScreenBoundsProvider(RecipeTweaksScreen.class, screen -> {
             int[] bounds = screen.emiScreenBounds();
             return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
         });

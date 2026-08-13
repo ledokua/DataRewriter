@@ -81,35 +81,22 @@ public final class GuiRecipeSaver {
             return SaveResult.failure("rejected by the recipe parser: " + result.error().get().message());
         }
 
-        Path dir = FabricLoader.getInstance().getConfigDir().resolve(Datarewriter.MOD_ID);
-        Path file = dir.resolve(FILE_NAME);
-        JsonObject root = new JsonObject();
+        JsonObject root;
         try {
-            Files.createDirectories(dir);
-            if (Files.exists(file)) {
-                String content = ConfigLoader.stripCommentsAndTrailingCommas(Files.readString(file));
-                JsonReader reader = new JsonReader(new StringReader(content));
-                reader.setLenient(true);
-                if (JsonParser.parseReader(reader) instanceof JsonObject existing) {
-                    root = existing;
-                } else {
-                    return SaveResult.failure(FILE_NAME + " exists but is not a config object — fix or delete it first");
-                }
-            }
-        } catch (Exception e) {
-            return SaveResult.failure("could not read " + FILE_NAME + ": " + e.getMessage());
+            root = readRoot();
+        } catch (IOException e) {
+            return SaveResult.failure(e.getMessage());
         }
 
-        JsonObject recipes = root.get("recipes") instanceof JsonObject r ? r : new JsonObject();
-        root.add("recipes", recipes);
+        JsonObject recipes = recipesSection(root);
         JsonArray add = recipes.get("add") instanceof JsonArray a ? a : new JsonArray();
         recipes.add("add", add);
         add.add(recipe);
 
         try {
-            Files.writeString(file, BANNER + GSON.toJson(root) + "\n");
+            writeRoot(root);
         } catch (IOException e) {
-            return SaveResult.failure("could not write " + FILE_NAME + ": " + e.getMessage());
+            return SaveResult.failure(e.getMessage());
         }
 
         // Without an explicit id, the id must match what ConfigLoader will
@@ -118,5 +105,84 @@ public final class GuiRecipeSaver {
                 : ResourceLocation.fromNamespaceAndPath(Datarewriter.MOD_ID,
                         ConfigLoader.sanitizePath(FILE_NAME.replaceFirst("\\.json5?$", "")) + "/" + add.size());
         return new SaveResult(null, new RecipeHolder<>(id, result.result().orElseThrow()));
+    }
+
+    /**
+     * Appends a bulk removal rule — {output: ref} or {input: ref} — to the
+     * recipes section (append-unique). Returns an error message or null.
+     */
+    public static String saveBulkRemoval(String condition, String ref) {
+        JsonObject rule = new JsonObject();
+        rule.addProperty(condition, ref);
+        return appendUnique("remove", rule);
+    }
+
+    /**
+     * Appends a {from, to} rule to recipes.replace_ingredients
+     * (append-unique). Returns an error message or null.
+     */
+    public static String saveReplaceIngredients(String from, String to) {
+        JsonObject rule = new JsonObject();
+        rule.addProperty("from", from);
+        rule.addProperty("to", to);
+        return appendUnique("replace_ingredients", rule);
+    }
+
+    private static String appendUnique(String listKey, JsonObject rule) {
+        JsonObject root;
+        try {
+            root = readRoot();
+        } catch (IOException e) {
+            return e.getMessage();
+        }
+        JsonObject recipes = recipesSection(root);
+        JsonArray list = recipes.get(listKey) instanceof JsonArray a ? a : new JsonArray();
+        recipes.add(listKey, list);
+        if (!list.contains(rule)) {
+            list.add(rule);
+        }
+        try {
+            writeRoot(root);
+        } catch (IOException e) {
+            return e.getMessage();
+        }
+        return null;
+    }
+
+    private static JsonObject recipesSection(JsonObject root) {
+        JsonObject recipes = root.get("recipes") instanceof JsonObject r ? r : new JsonObject();
+        root.add("recipes", recipes);
+        return recipes;
+    }
+
+    private static JsonObject readRoot() throws IOException {
+        Path file = FabricLoader.getInstance().getConfigDir()
+                .resolve(Datarewriter.MOD_ID).resolve(FILE_NAME);
+        if (!Files.exists(file)) {
+            return new JsonObject();
+        }
+        try {
+            String content = ConfigLoader.stripCommentsAndTrailingCommas(Files.readString(file));
+            JsonReader reader = new JsonReader(new StringReader(content));
+            reader.setLenient(true);
+            if (JsonParser.parseReader(reader) instanceof JsonObject existing) {
+                return existing;
+            }
+            throw new IOException(FILE_NAME + " exists but is not a config object — fix or delete it first");
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("could not read " + FILE_NAME + ": " + e.getMessage());
+        }
+    }
+
+    private static void writeRoot(JsonObject root) throws IOException {
+        Path dir = FabricLoader.getInstance().getConfigDir().resolve(Datarewriter.MOD_ID);
+        try {
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(FILE_NAME), BANNER + GSON.toJson(root) + "\n");
+        } catch (IOException e) {
+            throw new IOException("could not write " + FILE_NAME + ": " + e.getMessage());
+        }
     }
 }

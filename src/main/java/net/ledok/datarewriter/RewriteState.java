@@ -50,6 +50,13 @@ public final class RewriteState {
      */
     public static volatile Map<ResourceLocation, JsonElement> runtimeTableJsons = new ConcurrentHashMap<>();
 
+    /**
+     * The final recipe JSON of the last (re)load, after removals/additions —
+     * what vanilla parsed. The ingredient-replacement pass rewrites entries
+     * here and swaps the re-parsed recipes into the live RecipeManager.
+     */
+    public static volatile Map<ResourceLocation, JsonElement> recipeJsons = new ConcurrentHashMap<>();
+
     private RewriteState() {
     }
 
@@ -80,8 +87,8 @@ public final class RewriteState {
         RewriteConfig old = config();
         List<RewriteConfig.LootItemReplacement> rules = new ArrayList<>(old.lootItemReplacements());
         rules.add(rule);
-        config = new RewriteConfig(old.removals(), old.additions(), old.lootRemovals(),
-                old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
+        config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
+                old.lootRemovals(), old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
                 old.lootItemRemovals(), old.errorCount());
     }
 
@@ -90,9 +97,29 @@ public final class RewriteState {
         RewriteConfig old = config();
         List<RewriteConfig.LootItemRemoval> rules = new ArrayList<>(old.lootItemRemovals());
         rules.add(rule);
-        config = new RewriteConfig(old.removals(), old.additions(), old.lootRemovals(),
-                old.lootAdditions(), old.lootModifications(), old.lootItemReplacements(),
-                List.copyOf(rules), old.errorCount());
+        config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
+                old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
+                old.lootItemReplacements(), List.copyOf(rules), old.errorCount());
+    }
+
+    /** Same mirroring for a recipe removal rule the GUI just saved. */
+    public static synchronized void appendRemovalRule(RewriteConfig.RemovalRule rule) {
+        RewriteConfig old = config();
+        List<RewriteConfig.RemovalRule> rules = new ArrayList<>(old.removals());
+        rules.add(rule);
+        config = new RewriteConfig(List.copyOf(rules), old.additions(), old.ingredientReplacements(),
+                old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
+                old.lootItemReplacements(), old.lootItemRemovals(), old.errorCount());
+    }
+
+    /** Same mirroring for a replace_ingredients rule the GUI just saved. */
+    public static synchronized void appendIngredientReplacement(RewriteConfig.IngredientReplacement rule) {
+        RewriteConfig old = config();
+        List<RewriteConfig.IngredientReplacement> rules = new ArrayList<>(old.ingredientReplacements());
+        rules.add(rule);
+        config = new RewriteConfig(old.removals(), old.additions(), List.copyOf(rules),
+                old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
+                old.lootItemReplacements(), old.lootItemRemovals(), old.errorCount());
     }
 
     /**
@@ -101,7 +128,8 @@ public final class RewriteState {
      */
     public static void announce(MinecraftServer server) {
         RewriteConfig loaded = config;
-        boolean recipesInUse = !loaded.removals().isEmpty() || !loaded.additions().isEmpty();
+        boolean recipesInUse = !loaded.removals().isEmpty() || !loaded.additions().isEmpty()
+                || !loaded.ingredientReplacements().isEmpty();
         boolean lootInUse = !loaded.lootRemovals().isEmpty() || !loaded.lootAdditions().isEmpty()
                 || !loaded.lootModifications().isEmpty()
                 || !loaded.lootItemReplacements().isEmpty() || !loaded.lootItemRemovals().isEmpty();

@@ -20,16 +20,26 @@ import java.util.List;
 import java.util.Optional;
 
 public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additions,
+                            List<IngredientReplacement> ingredientReplacements,
                             List<LootRule> lootRemovals, List<AddedLootTable> lootAdditions,
                             List<LootModification> lootModifications,
                             List<LootItemReplacement> lootItemReplacements,
                             List<LootItemRemoval> lootItemRemovals,
                             int errorCount) {
     public static final RewriteConfig EMPTY =
-            new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+            new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                    List.of(), List.of(), 0);
 
     /** A new (or replacement) recipe in vanilla recipe JSON format. */
     public record AddedRecipe(ResourceLocation id, JsonElement json) {
+    }
+
+    /**
+     * Rewrites every recipe ingredient matching 'from' (an item id with '*'
+     * wildcards, or a '#tag' — items in the tag plus identical tag refs) to
+     * 'to' (an item id or a '#tag'). Result/output slots are left alone.
+     */
+    public record IngredientReplacement(ItemMatch from, String to, String source) {
     }
 
     /** A new (or replacement) loot table in vanilla loot table JSON format. */

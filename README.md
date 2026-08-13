@@ -54,6 +54,17 @@ remove: [
 | `output` | the item the recipe produces; `#tag` allowed |
 | `input` | any ingredient of the recipe; `#tag` allowed |
 
+Recipes can also have an ingredient **swapped everywhere** instead of being removed:
+
+```json5
+replace_ingredients: [
+  { from: "minecraft:diamond", to: "minecraft:emerald" },
+  { from: "#minecraft:logs_that_burn", to: "#minecraft:stone_bricks" },
+]
+```
+
+`from` is an item id (with `*` wildcards) or a `#tag` — a tag matches every item belonging to it plus ingredient refs to the identical tag; `to` is an item id or a `#tag`. Only **ingredients** are rewritten — results stay as they are — and every recipe is covered, whatever mod it comes from. The rewritten recipes are re-validated with the real recipe parser; a recipe that would break is left unchanged (with a log warning). Applied after startup/`/reload` (item tags need to be bound), and instantly when saved from the [recipe tweaks GUI](#recipe-tweaks-gui).
+
 Removal never touches recipes *you* added, so "remove everything from `minecraft:`, then re-add a few" works as expected.
 
 ## Adding & replacing recipes
@@ -179,13 +190,23 @@ If the mod is installed on your **client** too, you can create recipes visually 
 - **Native support** ships for known mods — see the [supported mods list](#natively-supported-mods) below. Each appears automatically when that mod is installed; every other mod's types are covered by [automatic detection](#modded-recipe-types--automatic).
 - Hover a text field to see the values existing recipes actually use for it (e.g. which `unit` strings a mod accepts) — collected automatically from all loaded recipes of that type.
 - Click a highlighted slot to choose an item from a searchable list (type `#` to search **tags** — item tags, or fluid tags on slots that accept them); right-click clears a slot. For slot types that support amounts, scroll the mouse wheel over the slot to change the count; where a recipe supports per-result chances, Alt+scroll sets them.
-- Your **inventory** is shown in the editor — click an item to pick it up, then click it into as many slots as you like (right-click drops it), or just drag it onto a slot. Buckets dropped on fluid slots become their fluid.
+- Your **inventory** is shown in the editor — click an item to pick it up, then click it into as many slots as you like (right-click drops it), or just drag it onto a slot. **Right-click an inventory item to pick up one of its `#tags`** instead (searchable list) and click it into any slot that takes tags. Buckets dropped on fluid slots become their fluid.
 - With **EMI** installed, its panels show up next to the editor and you can drag any item or fluid from them straight into a slot, like an AE2 pattern terminal — compatible slots light up green while dragging. Even better: open any recipe in EMI and click its **fill (+) button** to load that recipe into the editor — slots, amounts, chances, fields, and the id, ready to tweak and save (which replaces the original; clear the id to save a copy instead). (Optional; nothing is required at runtime.)
 - Middle-click a filled slot to **type an exact amount** (count or mB) instead of scrolling.
 - Optionally give the recipe an id (an existing id **replaces** that recipe), fill in any extra fields (XP, cooking time, …), and hit **Save recipe**. The editor stays open, so you can keep making recipes; **Clear** empties the current pattern.
 - Closing and reopening the editor brings back your last recipe type, slot contents, amounts, and field values (kept until the game quits).
 
 Saving sends the recipe to the server (op only), where it is validated by the real recipe parser, appended to `config/datarewriter/gui-recipes.json5` — a normal config file you can edit later — and **applied immediately** to the running game (no `/reload`; the recipe is live and synced to all players the moment you save). Nothing extra is needed on other players' clients or on the server beyond the mod itself.
+
+## Recipe tweaks GUI
+
+`/recipetweaker` (client-side, op only) is the bulk counterpart to the recipe editor: pick an item or `#tag` and choose what happens to it across **all** recipes at once —
+
+- **Remove its recipes** — every recipe that *produces* the item disappears (recipes you added with DataRewriter are kept).
+- **Remove recipes using it** — every recipe with the item as an *ingredient* disappears.
+- **Replace it in recipes** — the item (or `#tag`) is swapped for a second item or `#tag` in every recipe's ingredients; results are untouched.
+
+The slots work like everywhere else: click to pick from your inventory (right-click an inventory item there for its `#tags`), drop from EMI, or search all items. Applying saves the matching `remove`/`replace_ingredients` rule to `config/datarewriter/gui-recipes.json5` (delete it there to undo), applies it live and reports the count in chat. The screen remembers its slots and mode until the game quits.
 
 ### Natively supported mods
 
@@ -257,7 +278,7 @@ A commented example is generated at `config/datarewriter/editor-layouts/example.
 
 Loot tables get the same treatment as recipes: run `/loottableeditor` (client-side, op only) to browse and edit them visually. Loot tables are never synced to clients, so everything you see comes fresh from the server.
 
-- The picker lists **every loot table on the server** with a search box. Search is EMI-style: all space-separated words must match, and `@mod` filters by namespace — `@minecraft end` shows Minecraft's tables containing "end". Click one to edit it; typing an id that doesn't exist and pressing Enter creates a **new table** under that id.
+- The picker lists **every loot table on the server** with a search box and a draggable scrollbar. Search is EMI-style: all space-separated words must match, and `@mod` filters by namespace — `@minecraft end` shows Minecraft's tables containing "end". Click one to edit it; typing an id that doesn't exist and pressing Enter creates a **new table** under that id. The picker remembers its search, filter and scroll position until the game quits.
 - **Filter by item** shows only the tables that actually drop a chosen item — the quick way to answer "where can diamonds come from?" before changing that. It also takes a `#tag` (e.g. `#c:fishes`): tables drop-matching **any item from the tag** (or the tag itself) are shown.
 - Choosing an item never means typing ids: click one in your **inventory**, drag one in from **EMI**, or fall back to the searchable all-items list (same `@mod`-aware search). Where tags make sense, **right-click an inventory item to pick one of its `#tags`** instead. (`*` wildcard patterns remain a config-file feature.)
 - **Replace item…** / **Remove item…** work across many loot tables at once: pick the item **or one of its tags** (right-click; a `#tag` covers every item in it), a replacement item if replacing, then choose **which tables** — every table, one mod (`somemod:*`), only chests, or anything *except* block/entity drops (`!*:blocks/*` — quick preset buttons cover the common cases). Entries keep their weights, counts and conditions when replaced. The operation is saved as a `replace_items`/`remove_items` rule in `config/datarewriter/gui-loot-tables.json5` — delete the rule there to undo it.
@@ -265,6 +286,7 @@ Loot tables get the same treatment as recipes: run `/loottableeditor` (client-si
 - Click a slot to set its item (`#tags` work too) — or drop an item from the inventory panel or EMI **anywhere on a pool's card** to add it to that pool, or exactly on a slot to replace that entry. Right-click the `+` slot to add an **empty entry** (a weighted chance to drop nothing); right-click an entry deletes it, `✕` deletes a pool.
 - **Complex entries are editable too**: an `alternatives`/`group`/`sequence` entry shows as a bundle with its entry count — click it to open a sub-editor for its children (same controls, nesting included), and a nested `loot_table` reference shows as a chest — click it to pick a different target table. Middle-click a pool's `+` slot to **create** one of these. Anything beyond that (inline nested tables, `dynamic` entries, custom conditions) still shows as a locked slot and is **preserved exactly as-is**, same for fancy count/chance formulas.
 - **Save table** stores the whole table as a replacement (also the only way to keep edits/deletions of the table's *own* entries); with every pool deleted it saves an empty-table rule instead. **Save added pools** appends just your new pools, leaving the table's own loot to its mod — survives mod updates, like config `modify`. **Empty table** removes all pools *locally* — nothing is saved until you press Save table, and **Reload** discards unsaved edits and refetches the table.
+- **Unsaved edits survive closing the editor**: each table keeps its draft (per table id, until the game quits) and reopening the table restores it, clearly marked. Save makes a draft permanent, Reload throws it away.
 
 Saves are validated with the vanilla loot table parser, written to `config/datarewriter/gui-loot-tables.json5` (a normal config file) and **applied to the running server immediately** — kill the mob or open the chest and the new drops are live, no `/reload`.
 

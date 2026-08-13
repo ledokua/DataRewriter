@@ -48,11 +48,12 @@ public final class ConfigLoader {
             error("Could not create config directory {}: {}", dir, e.getMessage());
             lastIssues = List.copyOf(issues);
             return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), 1);
+                    List.of(), List.of(), List.of(), 1);
         }
 
         List<RewriteConfig.RemovalRule> removals = new ArrayList<>();
         List<RewriteConfig.AddedRecipe> additions = new ArrayList<>();
+        List<RewriteConfig.IngredientReplacement> ingredientReplacements = new ArrayList<>();
         List<RewriteConfig.LootRule> lootRemovals = new ArrayList<>();
         List<RewriteConfig.AddedLootTable> lootAdditions = new ArrayList<>();
         List<RewriteConfig.LootModification> lootModifications = new ArrayList<>();
@@ -73,8 +74,8 @@ public final class ConfigLoader {
                     .sorted()
                     .toList();
             for (Path file : files) {
-                loadFile(file, removals, additions, lootRemovals, lootAdditions, lootModifications,
-                        lootItemReplacements, lootItemRemovals);
+                loadFile(file, removals, additions, ingredientReplacements, lootRemovals,
+                        lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals);
             }
         } catch (IOException e) {
             error("Could not read config directory {}", dir, e);
@@ -82,6 +83,7 @@ public final class ConfigLoader {
 
         lastIssues = List.copyOf(issues);
         return new RewriteConfig(List.copyOf(removals), List.copyOf(additions),
+                List.copyOf(ingredientReplacements),
                 List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                 List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                 errors);
@@ -105,6 +107,7 @@ public final class ConfigLoader {
 
     private static void loadFile(Path file, List<RewriteConfig.RemovalRule> removals,
                                  List<RewriteConfig.AddedRecipe> additions,
+                                 List<RewriteConfig.IngredientReplacement> ingredientReplacements,
                                  List<RewriteConfig.LootRule> lootRemovals,
                                  List<RewriteConfig.AddedLootTable> lootAdditions,
                                  List<RewriteConfig.LootModification> lootModifications,
@@ -129,7 +132,7 @@ public final class ConfigLoader {
 
         if (root.has("recipes")) {
             if (root.get("recipes") instanceof JsonObject recipes) {
-                readRecipesSection(recipes, fileName, removals, additions);
+                readRecipesSection(recipes, fileName, removals, additions, ingredientReplacements);
             } else {
                 error("[{}] 'recipes' must be an object with 'remove' and/or 'add' lists", fileName);
             }
@@ -367,19 +370,74 @@ public final class ConfigLoader {
 
     private static void readRecipesSection(JsonObject recipes, String fileName,
                                            List<RewriteConfig.RemovalRule> removals,
-                                           List<RewriteConfig.AddedRecipe> additions) {
+                                           List<RewriteConfig.AddedRecipe> additions,
+                                           List<RewriteConfig.IngredientReplacement> replacements) {
         if (recipes.has("remove")) {
             readRemovals(recipes.get("remove"), fileName, removals);
         }
         if (recipes.has("add")) {
             readAdditions(recipes.get("add"), fileName, additions);
         }
+        if (recipes.has("replace_ingredients")) {
+            readIngredientReplacements(recipes.get("replace_ingredients"), fileName, replacements);
+        }
         for (String key : recipes.keySet()) {
-            if (!key.equals("remove") && !key.equals("add")) {
-                warn("[{}] recipes: unknown key '{}' (expected 'remove' or 'add')",
-                        fileName, key);
+            if (!List.of("remove", "add", "replace_ingredients").contains(key)) {
+                warn("[{}] recipes: unknown key '{}' (expected 'remove', 'add' "
+                        + "or 'replace_ingredients')", fileName, key);
             }
         }
+    }
+
+    private static void readIngredientReplacements(JsonElement element, String fileName,
+                                                   List<RewriteConfig.IngredientReplacement> replacements) {
+        if (!(element instanceof JsonArray array)) {
+            error("[{}] recipes 'replace_ingredients' must be a list", fileName);
+            return;
+        }
+        int index = 0;
+        for (JsonElement entry : array) {
+            index++;
+            if (entry.isJsonNull()) {
+                continue;
+            }
+            if (!(entry instanceof JsonObject obj)) {
+                error("[{}] recipes replace_ingredients[{}] must be an object "
+                        + "like { from: \"minecraft:stick\", to: \"#c:rods\" }", fileName, index);
+                continue;
+            }
+            String fromText = readString(obj, "from");
+            String toText = readString(obj, "to");
+            ItemMatch from = fromText == null ? null : ItemMatch.parse(fromText);
+            if (from == null) {
+                error("[{}] recipes replace_ingredients[{}] needs 'from' — an item id "
+                        + "(with '*' wildcards) or a '#tag'", fileName, index);
+                continue;
+            }
+            String to = normalizeItemOrTag(toText);
+            if (to == null) {
+                error("[{}] recipes replace_ingredients[{}] needs 'to' — an item id or a '#tag'",
+                        fileName, index);
+                continue;
+            }
+            for (String key : obj.keySet()) {
+                if (!key.equals("from") && !key.equals("to")) {
+                    warn("[{}] recipes replace_ingredients[{}]: unknown key '{}'",
+                            fileName, index, key);
+                }
+            }
+            replacements.add(new RewriteConfig.IngredientReplacement(from, to, fileName));
+        }
+    }
+
+    /** "id" or "#tag" with the namespace defaulted, or null when invalid. */
+    public static String normalizeItemOrTag(String text) {
+        if (text == null || text.isEmpty() || text.contains("*")) {
+            return null;
+        }
+        boolean tag = text.startsWith("#");
+        ResourceLocation id = ResourceLocation.tryParse(tag ? text.substring(1) : text);
+        return id == null ? null : (tag ? "#" + id : id.toString());
     }
 
     private static void readRemovals(JsonElement element, String fileName,
@@ -670,6 +728,14 @@ public final class ConfigLoader {
                   //   experience: 0.1,
                   //   cookingtime: 200,
                   // },
+                ],
+
+                // Swap an ingredient in EVERY recipe (results are not touched).
+                // 'from': item id ('*' wildcards ok) or '#tag' (items in the tag,
+                // plus refs to the identical tag). 'to': item id or '#tag'.
+                replace_ingredients: [
+                  // { from: "minecraft:diamond", to: "minecraft:emerald" },
+                  // { from: "#minecraft:logs_that_burn", to: "#minecraft:stone_bricks" },
                 ],
               },
 

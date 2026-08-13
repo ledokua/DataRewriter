@@ -78,6 +78,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     private int invTop;
     /** Item picked up from the inventory panel, rendered on the cursor. */
     private Item cursorItem;
+    /** "#tag" picked via right-click on an inventory item, on the cursor. */
+    private String cursorTag;
 
     // Rectangle around the whole UI (panel + widgets + inventory), so EMI can
     // place its side panels next to the editor instead of over it.
@@ -445,6 +447,13 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
 
         if (cursorItem != null) {
             graphics.renderItem(new ItemStack(cursorItem), mouseX - 8, mouseY - 8);
+        } else if (cursorTag != null) {
+            graphics.renderItem(iconFor(cursorTag, false), mouseX - 8, mouseY - 8);
+            graphics.pose().pushPose();
+            graphics.pose().translate(mouseX - 8, mouseY - 8, 200);
+            graphics.pose().scale(0.5f, 0.5f, 1);
+            graphics.drawString(font, "#", 1, 23, 0xFFAA00, true);
+            graphics.pose().popPose();
         }
     }
 
@@ -502,6 +511,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                     Component.literal(BuiltInRegistries.ITEM.getKey(hovered.getItem()).toString())
                             .withStyle(ChatFormatting.DARK_GRAY),
                     Component.literal("Click to pick up, then click any slots — right-click drops")
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.literal("Right-click: pick up one of its #tags instead "
+                            + "(for slots that take tags)")
                             .withStyle(ChatFormatting.GRAY)),
                     mouseX, mouseY);
         }
@@ -639,16 +651,27 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         // Our slots/inventory come first: AbstractContainerScreen.mouseClicked
         // consumes every click, so it must only see what we didn't handle.
-        if (button == 1 && cursorItem != null) {
-            cursorItem = null; // right-click drops the picked-up item
+        if (button == 1 && (cursorItem != null || cursorTag != null)) {
+            cursorItem = null; // right-click drops the picked-up item/tag
+            cursorTag = null;
             return true;
         }
         int invIndex = invSlotAt(mouseX, mouseY);
-        if (invIndex >= 0 && button == 0) {
+        if (invIndex >= 0 && (button == 0 || button == 1)) {
             assert minecraft != null && minecraft.player != null;
             List<ItemStack> items = minecraft.player.getInventory().items;
             if (invIndex < items.size() && !items.get(invIndex).isEmpty()) {
-                cursorItem = items.get(invIndex).getItem();
+                if (button == 0) {
+                    cursorItem = items.get(invIndex).getItem();
+                } else {
+                    // Right-click: put one of the item's #tags on the cursor
+                    // instead, for slots that accept tags.
+                    minecraft.setScreen(new ItemTagListScreen(this,
+                            items.get(invIndex).getItem(), tag -> {
+                        cursorTag = tag;
+                        cursorItem = null;
+                    }));
+                }
             }
             return true;
         }
@@ -674,6 +697,12 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             return true;
         }
         if (button == 0) {
+            if (cursorTag != null) {
+                if (slot.acceptsTags() && !slot.format().fluid()) {
+                    refs()[index] = cursorTag; // stays on the cursor, AE2-style
+                }
+                return true;
+            }
             if (cursorItem != null) {
                 // AE2-style: the item stays on the cursor so it can be placed
                 // into several slots; right-click drops it.
@@ -818,6 +847,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         COUNTS_BY_TYPE.remove(layout.typeId);
         CHANCES_BY_TYPE.remove(layout.typeId);
         cursorItem = null;
+        cursorTag = null;
         status = Component.empty();
     }
 

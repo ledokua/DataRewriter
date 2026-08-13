@@ -25,6 +25,12 @@ public class LootTablePickerScreen extends Screen {
     private static final int ROW_HEIGHT = 13;
     private static final int LIST_WIDTH = 300;
 
+    // The main picker's search, filter and position survive close/reopen
+    // (until the game quits), like the recipe editor's slots.
+    private static String lastQuery = "";
+    private static String lastFilter = "";
+    private static int lastScroll;
+
     private String query = "";
     /** Item id the server-side list was filtered by ("" = all tables). */
     private String itemFilter = "";
@@ -32,6 +38,8 @@ public class LootTablePickerScreen extends Screen {
     private List<String> filtered = List.of();
     private boolean loading = true;
     private int scrollRow;
+    private boolean restoreScroll;
+    private final ScrollBar scrollBar = new ScrollBar();
 
     /** Non-null = selection mode: clicking a table hands its id back instead of editing. */
     private final Consumer<String> onSelect;
@@ -41,6 +49,9 @@ public class LootTablePickerScreen extends Screen {
         super(Component.literal("Loot Table Editor"));
         this.onSelect = null;
         this.returnTo = null;
+        this.query = lastQuery;
+        this.itemFilter = lastFilter;
+        this.restoreScroll = true;
     }
 
     /** Selection mode: pick a table id (with search/filter) and return to {@code returnTo}. */
@@ -58,6 +69,10 @@ public class LootTablePickerScreen extends Screen {
         this.ids = tableIds;
         this.loading = false;
         refresh();
+        if (restoreScroll) {
+            restoreScroll = false;
+            scrollRow = Math.max(0, Math.min(lastScroll, filtered.size() - visibleRows()));
+        }
     }
 
     private void requestList() {
@@ -241,6 +256,8 @@ public class LootTablePickerScreen extends Screen {
             }
             graphics.drawString(font, filtered.get(index), left, y + 2, 0xFFFFFF);
         }
+        scrollBar.render(graphics, left + LIST_WIDTH + 6, top, rows * ROW_HEIGHT,
+                filtered.size(), rows, scrollRow);
 
         String footer;
         if (loading) {
@@ -280,6 +297,11 @@ public class LootTablePickerScreen extends Screen {
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
+        int barValue = scrollBar.mouseClicked(mouseX, mouseY);
+        if (barValue >= 0) {
+            scrollRow = barValue;
+            return true;
+        }
         int left = listLeft();
         int top = listTop();
         if (button == 0 && mouseX >= left && mouseX < left + LIST_WIDTH
@@ -291,6 +313,22 @@ public class LootTablePickerScreen extends Screen {
             }
         }
         return false;
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        int barValue = scrollBar.mouseDragged(mouseY);
+        if (barValue >= 0) {
+            scrollRow = barValue;
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        scrollBar.mouseReleased();
+        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
@@ -307,6 +345,18 @@ public class LootTablePickerScreen extends Screen {
             }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public void removed() {
+        // Fires on every screen change (editor, sub-screens, close) — the
+        // main picker's state is simply kept fresh for the next open.
+        if (onSelect == null) {
+            lastQuery = query;
+            lastFilter = itemFilter;
+            lastScroll = scrollRow;
+        }
+        super.removed();
     }
 
     @Override

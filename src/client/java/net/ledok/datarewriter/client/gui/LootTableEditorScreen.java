@@ -47,6 +47,16 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     private final Screen parent;
     public final String tableId;
 
+    /**
+     * Unsaved edits, kept per table id until the game quits (like the recipe
+     * editor's slots): reopening a table restores its draft; Save and Reload
+     * clear it.
+     */
+    private record Draft(String tableJson, List<Boolean> newFlags, boolean dirtyExisting) {
+    }
+
+    private static final Map<String, Draft> DRAFTS = new HashMap<>();
+
     /** Table-level JSON with all keys the editor doesn't manage preserved. */
     private JsonObject tableSource = new JsonObject();
     private final List<PoolState> pools = new ArrayList<>();
@@ -67,6 +77,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
 
     /** The mouse-press already placed the cursor item — its release must not place again. */
     private boolean placedOnPress;
+
+    private final ScrollBar scrollBar = new ScrollBar();
 
     private int contentLeft;
     private int panelLeft;
@@ -169,6 +181,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         cursorItem = null;
         tableSource = new JsonObject();
         existsOnServer = !json.isEmpty();
+        if (restoreDraft(injected)) {
+            return;
+        }
         if (json.isEmpty()) {
             status = Component.literal("New table — it doesn't exist yet. Add a pool.")
                     .withStyle(ChatFormatting.YELLOW);
@@ -188,6 +203,34 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
         parseInjected(injected);
         rebuildWidgets();
+    }
+
+    /** Restores this table's unsaved draft, if one exists. */
+    private boolean restoreDraft(String injected) {
+        Draft draft = DRAFTS.get(tableId);
+        if (draft == null) {
+            return false;
+        }
+        try {
+            if (!(JsonParser.parseString(draft.tableJson()) instanceof JsonObject table)) {
+                return false;
+            }
+            parseTable(table);
+            for (int i = 0; i < pools.size() && i < draft.newFlags().size(); i++) {
+                pools.get(i).isNew = draft.newFlags().get(i);
+            }
+            dirtyExisting = draft.dirtyExisting();
+            status = Component.literal("Restored unsaved edits from this session — Reload discards them.")
+                    .withStyle(ChatFormatting.YELLOW);
+            parseInjected(injected);
+            rebuildWidgets();
+            return true;
+        } catch (Exception e) {
+            pools.clear();
+            tableSource = new JsonObject();
+            DRAFTS.remove(tableId);
+            return false;
+        }
     }
 
     /** Pools other mods added at runtime, appended to the view as read-only. */
@@ -658,6 +701,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         addRenderableWidget(Button.builder(Component.literal("Reload"), b -> {
                     scrollOffset = 0;
                     status = Component.empty();
+                    DRAFTS.remove(tableId); // Reload really discards the draft
                     requestContent();
                 })
                 .bounds(contentLeft + buttonW + 4, y, buttonW, 20)
@@ -902,15 +946,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
         graphics.disableScissor();
 
-        if (poolContentHeight() > panelHeight) {
-            // Simple scroll indicator on the panel's right edge.
-            int track = panelHeight - 4;
-            int thumb = Math.max(8, track * panelHeight / poolContentHeight());
-            int offset = (track - thumb) * scrollOffset
-                    / Math.max(1, poolContentHeight() - panelHeight);
-            graphics.fill(right - 3, panelTop + 2 + offset, right - 1,
-                    panelTop + 2 + offset + thumb, 0xFF555555);
-        }
+        scrollBar.render(graphics, right - 6, panelTop + 2, panelHeight - 4,
+                poolContentHeight(), panelHeight, scrollOffset);
 
         renderInventory(graphics, mouseX, mouseY);
 
@@ -1142,6 +1179,13 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             cursorItem = null;
             return true;
         }
+        if (button == 0) {
+            int barValue = scrollBar.mouseClicked(mouseX, mouseY);
+            if (barValue >= 0) {
+                scrollOffset = barValue;
+                return true;
+            }
+        }
         int invIndex = invSlotAt(mouseX, mouseY);
         if (invIndex >= 0 && button == 0) {
             assert minecraft != null && minecraft.player != null;
@@ -1324,6 +1368,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        scrollBar.mouseReleased();
         if (button == 0 && cursorItem != null) {
             if (placedOnPress) {
                 placedOnPress = false;
@@ -1343,6 +1388,16 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             }
         }
         return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        int barValue = scrollBar.mouseDragged(mouseY);
+        if (barValue >= 0) {
+            scrollOffset = barValue;
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
     @Override
@@ -1482,6 +1537,27 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     @Override
     protected boolean hasClickedOutside(double mouseX, double mouseY, int guiLeft, int guiTop, int mouseButton) {
         return false;
+    }
+
+    @Override
+    public void removed() {
+        // Fires on every screen change (sub-screens included) — keep the
+        // draft in sync so unsaved edits survive close/reopen. A clean state
+        // clears any stale draft (Save went through, or nothing changed).
+        if (!loading) {
+            boolean dirty = dirtyExisting
+                    || pools.stream().anyMatch(pool -> pool.isNew && !pool.injected);
+            if (dirty) {
+                List<Boolean> newFlags = pools.stream()
+                        .filter(pool -> !pool.injected)
+                        .map(pool -> pool.isNew)
+                        .toList();
+                DRAFTS.put(tableId, new Draft(buildTableJson().toString(), newFlags, dirtyExisting));
+            } else {
+                DRAFTS.remove(tableId);
+            }
+        }
+        super.removed();
     }
 
     @Override

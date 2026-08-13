@@ -8,11 +8,13 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.ledok.datarewriter.client.gui.LootTableEditorScreen;
 import net.ledok.datarewriter.client.gui.LootTablePickerScreen;
 import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
+import net.ledok.datarewriter.client.gui.RecipeTweaksScreen;
 import net.ledok.datarewriter.network.LootPayloads;
 
 public class DatarewriterClient implements ClientModInitializer {
     private static boolean openEditorNextTick;
     private static boolean openLootEditorNextTick;
+    private static boolean openTweaksNextTick;
 
     @Override
     public void onInitializeClient() {
@@ -29,18 +31,27 @@ public class DatarewriterClient implements ClientModInitializer {
                         openLootEditorNextTick = true;
                         return 1;
                     }));
+            dispatcher.register(ClientCommandManager.literal("recipetweaker")
+                    .executes(context -> {
+                        openTweaksNextTick = true;
+                        return 1;
+                    }));
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.level == null) {
                 openEditorNextTick = false;
                 openLootEditorNextTick = false;
+                openTweaksNextTick = false;
             } else if (openEditorNextTick && client.screen == null) {
                 openEditorNextTick = false;
                 client.setScreen(new RecipeEditorScreen());
             } else if (openLootEditorNextTick && client.screen == null) {
                 openLootEditorNextTick = false;
                 client.setScreen(new LootTablePickerScreen());
+            } else if (openTweaksNextTick && client.screen == null) {
+                openTweaksNextTick = false;
+                client.setScreen(new RecipeTweaksScreen());
             }
         });
 
