@@ -850,6 +850,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                                 : " — looks like '" + pool.injectedBy + "'")),
                         Component.literal("Read-only here — change it in that mod's own config. "
                                 + "Bulk Replace/Remove item DOES cover it.")
+                                .withStyle(ChatFormatting.GRAY),
+                        Component.literal("#tags from the mod's config are expanded into the "
+                                + "individual items shown here.")
                                 .withStyle(ChatFormatting.GRAY));
             } else if (rollsHover && !pool.rollsLocked && !pool.injected) {
                 tooltip = List.of(
@@ -1004,6 +1007,11 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
             lines.add(Component.literal("Read-only here — change it in that mod's own config. "
                     + "Bulk Replace/Remove item DOES cover it.").withStyle(ChatFormatting.GRAY));
+            if (entry.kind == Kind.ITEM) {
+                lines.add(Component.literal("Injecting mods usually expand a config #tag into "
+                        + "single items like this one — target the item id, not the tag.")
+                        .withStyle(ChatFormatting.GRAY));
+            }
         }
         switch (entry.kind) {
             case ITEM -> {
