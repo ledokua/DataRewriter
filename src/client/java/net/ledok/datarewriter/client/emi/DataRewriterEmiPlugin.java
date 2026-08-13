@@ -11,6 +11,9 @@ import dev.emi.emi.api.recipe.handler.EmiRecipeHandler;
 import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
 import dev.emi.emi.api.widget.Bounds;
+import net.ledok.datarewriter.client.gui.CompositeEntryScreen;
+import net.ledok.datarewriter.client.gui.ItemSelectScreen;
+import net.ledok.datarewriter.client.gui.LootTableEditorScreen;
 import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
 import net.ledok.datarewriter.menu.EditorMenu;
 import net.minecraft.client.Minecraft;
@@ -50,6 +53,73 @@ public class DataRewriterEmiPlugin implements EmiPlugin {
         // provider opts a plain Screen in and tells EMI where the UI sits so
         // the panels appear beside it.
         registry.addScreenBoundsProvider(RecipeEditorScreen.class, screen -> {
+            int[] bounds = screen.emiScreenBounds();
+            return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
+        });
+
+        // Same drag & drop for the loot table editor's entry slots.
+        registry.addDragDropHandler(LootTableEditorScreen.class, new EmiDragDropHandler<>() {
+            @Override
+            public boolean dropStack(LootTableEditorScreen screen, EmiIngredient ingredient, int x, int y) {
+                Object key = firstKey(ingredient);
+                return key != null && screen.emiDrop(x, y, key);
+            }
+
+            @Override
+            public void render(LootTableEditorScreen screen, EmiIngredient dragged,
+                               GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+                Object key = firstKey(dragged);
+                if (key != null) {
+                    screen.renderEmiDropTargets(graphics, key);
+                }
+            }
+        });
+        registry.addScreenBoundsProvider(LootTableEditorScreen.class, screen -> {
+            int[] bounds = screen.emiScreenBounds();
+            return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
+        });
+
+        // The "pick one item" step of the loot picker's filter/bulk actions:
+        // dropping an EMI item anywhere on the window selects it.
+        registry.addDragDropHandler(ItemSelectScreen.class, new EmiDragDropHandler<>() {
+            @Override
+            public boolean dropStack(ItemSelectScreen screen, EmiIngredient ingredient, int x, int y) {
+                Object key = firstKey(ingredient);
+                return key != null && screen.emiDrop(x, y, key);
+            }
+
+            @Override
+            public void render(ItemSelectScreen screen, EmiIngredient dragged,
+                               GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+                Object key = firstKey(dragged);
+                if (key != null) {
+                    screen.renderEmiDropTargets(graphics, key);
+                }
+            }
+        });
+        registry.addScreenBoundsProvider(ItemSelectScreen.class, screen -> {
+            int[] bounds = screen.emiScreenBounds();
+            return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
+        });
+
+        // Sub-editor for composite loot entries (alternatives/group/sequence).
+        registry.addDragDropHandler(CompositeEntryScreen.class, new EmiDragDropHandler<>() {
+            @Override
+            public boolean dropStack(CompositeEntryScreen screen, EmiIngredient ingredient, int x, int y) {
+                Object key = firstKey(ingredient);
+                return key != null && screen.emiDrop(x, y, key);
+            }
+
+            @Override
+            public void render(CompositeEntryScreen screen, EmiIngredient dragged,
+                               GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+                Object key = firstKey(dragged);
+                if (key != null) {
+                    screen.renderEmiDropTargets(graphics, key);
+                }
+            }
+        });
+        registry.addScreenBoundsProvider(CompositeEntryScreen.class, screen -> {
             int[] bounds = screen.emiScreenBounds();
             return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
         });

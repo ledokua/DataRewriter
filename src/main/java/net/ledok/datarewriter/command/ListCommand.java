@@ -4,6 +4,8 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.ledok.datarewriter.Datarewriter;
+import net.ledok.datarewriter.config.ConfigLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -26,6 +28,8 @@ import java.util.stream.Stream;
  * /datarewriter list recipes|loot_tables [mod] [page] — discover ids for
  * config rules in game. Ids are click-to-copy; everything is server-side, so
  * it works from vanilla clients too.
+ * /datarewriter errors — the last config load's errors and warnings, in chat
+ * and the server log.
  */
 public final class ListCommand {
     private static final int PAGE_SIZE = 30;
@@ -50,7 +54,46 @@ public final class ListCommand {
                         .requires(source -> source.hasPermission(2))
                         .then(Commands.literal("list")
                                 .then(kindNode(Kind.RECIPES))
-                                .then(kindNode(Kind.LOOT_TABLES)))));
+                                .then(kindNode(Kind.LOOT_TABLES)))
+                        .then(Commands.literal("errors")
+                                .executes(ctx -> showErrors(ctx.getSource())))));
+    }
+
+    /** How many issue lines go to chat before pointing at the log instead. */
+    private static final int MAX_CHAT_ISSUES = 20;
+
+    /**
+     * /datarewriter errors — the errors and warnings of the last config load,
+     * in chat and (again, together) in the server log.
+     */
+    private static int showErrors(CommandSourceStack source) {
+        List<String> issues = ConfigLoader.issues();
+        if (issues.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("[DataRewriter] ").withStyle(ChatFormatting.GOLD)
+                    .append(Component.literal("No errors or warnings in the last config load.")
+                            .withStyle(ChatFormatting.GREEN)), false);
+            return 0;
+        }
+
+        Datarewriter.LOGGER.info("{} config issue(s) in the last load:", issues.size());
+        for (String issue : issues) {
+            Datarewriter.LOGGER.info("  {}", issue);
+        }
+
+        source.sendSuccess(() -> Component.literal("[DataRewriter] ").withStyle(ChatFormatting.GOLD)
+                .append(Component.literal(issues.size() + " config issue(s) in the last load"
+                                + " (also printed to the server log; /reload re-checks):")
+                        .withStyle(ChatFormatting.GRAY)), false);
+        for (int i = 0; i < issues.size() && i < MAX_CHAT_ISSUES; i++) {
+            String issue = issues.get(i);
+            ChatFormatting color = issue.startsWith("ERROR") ? ChatFormatting.RED : ChatFormatting.YELLOW;
+            source.sendSuccess(() -> Component.literal(issue).withStyle(color), false);
+        }
+        if (issues.size() > MAX_CHAT_ISSUES) {
+            source.sendSuccess(() -> Component.literal("…and " + (issues.size() - MAX_CHAT_ISSUES)
+                    + " more — see the server log.").withStyle(ChatFormatting.GRAY), false);
+        }
+        return issues.size();
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> kindNode(Kind kind) {

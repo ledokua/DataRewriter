@@ -62,6 +62,9 @@ final class BundledLayouts {
         if (typeExists("runes:crafting")) {
             layouts.add(runesCrafting());
         }
+        if (typeExists("potions_ld:potion_brewing")) {
+            layouts.add(potionsLdBrewing());
+        }
         return layouts;
     }
 
@@ -121,6 +124,24 @@ final class BundledLayouts {
         return new EditorLayout("runes:crafting", "Crafting Altar (Runes)",
                 ResourceLocation.fromNamespaceAndPath("runes", "textures/gui/crafting_altar.png"),
                 0, 0, 176, 166, 84, Kind.SLOTS, slots, List.of());
+    }
+
+    /**
+     * Alchemy table on its own GUI: 2x2 counted ingredients -> result. The
+     * three right-hand upgrade slots are machine gear, not recipe data. The
+     * mod's result codec uses "item" instead of vanilla's "id".
+     */
+    private static EditorLayout potionsLdBrewing() {
+        List<SlotDef> slots = List.of(
+                new SlotDef(29, 21, "ingredients[]", SlotFormat.COUNTED_INGREDIENT, false, true),
+                new SlotDef(47, 21, "ingredients[]", SlotFormat.COUNTED_INGREDIENT, false, false),
+                new SlotDef(29, 40, "ingredients[]", SlotFormat.COUNTED_INGREDIENT, false, false),
+                new SlotDef(47, 40, "ingredients[]", SlotFormat.COUNTED_INGREDIENT, false, false),
+                new SlotDef(116, 31, "result", SlotFormat.ITEM_NAMED, true, true));
+        return new EditorLayout("potions_ld:potion_brewing", "Alchemy Table (Potions LD)",
+                ResourceLocation.fromNamespaceAndPath("potions_ld", "textures/gui/alchemy_table.png"),
+                0, 0, 176, 166, 84, Kind.SLOTS, slots,
+                List.of(new FieldDef("cookingTime", "Time (ticks)", FieldType.INT, "100", false)));
     }
 
     private static boolean typeExists(String typeId) {

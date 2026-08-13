@@ -16,16 +16,26 @@ public class AmountInputScreen extends Screen {
     private final int min;
     private final int max;
     private final IntConsumer onSet;
+    private final Component extraLabel;
+    private final Runnable extraAction;
 
     private String text;
 
     public AmountInputScreen(Screen parent, Component label, int initial, int min, int max, IntConsumer onSet) {
+        this(parent, label, initial, min, max, onSet, null, null);
+    }
+
+    /** With an extra action button below OK/Cancel (e.g. "Convert to tag…"). */
+    public AmountInputScreen(Screen parent, Component label, int initial, int min, int max,
+                             IntConsumer onSet, Component extraLabel, Runnable extraAction) {
         super(Component.literal("Set amount"));
         this.parent = parent;
         this.label = label;
         this.min = min;
         this.max = max;
         this.onSet = onSet;
+        this.extraLabel = extraLabel;
+        this.extraAction = extraAction;
         this.text = String.valueOf(initial);
     }
 
@@ -45,15 +55,24 @@ public class AmountInputScreen extends Screen {
                 .bounds(centerX - 50, y + 24, 48, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
                 .bounds(centerX + 2, y + 24, 48, 20).build());
+        if (extraLabel != null && extraAction != null) {
+            addRenderableWidget(Button.builder(extraLabel, b -> extraAction.run())
+                    .bounds(centerX - 60, y + 48, 120, 20).build());
+        }
     }
 
     private void confirm() {
+        assert minecraft != null;
+        Screen before = minecraft.screen;
         try {
             onSet.accept(Math.max(min, Math.min(max, Integer.parseInt(text.trim()))));
         } catch (NumberFormatException ignored) {
             // empty/invalid input keeps the old amount
         }
-        onClose();
+        // Return to the parent unless the callback already opened another screen.
+        if (minecraft.screen == before) {
+            onClose();
+        }
     }
 
     @Override
@@ -62,7 +81,7 @@ public class AmountInputScreen extends Screen {
         graphics.drawCenteredString(font, label, width / 2, height / 2 - 34, 0xFFFFFF);
         graphics.drawCenteredString(font,
                 Component.literal(min + " – " + max).withStyle(ChatFormatting.DARK_GRAY),
-                width / 2, height / 2 + 30, 0x707070);
+                width / 2, height / 2 + (extraLabel != null ? 54 : 30), 0x707070);
     }
 
     @Override

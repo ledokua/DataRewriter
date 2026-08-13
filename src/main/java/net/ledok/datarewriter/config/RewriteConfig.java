@@ -22,9 +22,11 @@ import java.util.Optional;
 public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additions,
                             List<LootRule> lootRemovals, List<AddedLootTable> lootAdditions,
                             List<LootModification> lootModifications,
+                            List<LootItemReplacement> lootItemReplacements,
+                            List<LootItemRemoval> lootItemRemovals,
                             int errorCount) {
     public static final RewriteConfig EMPTY =
-            new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+            new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
 
     /** A new (or replacement) recipe in vanilla recipe JSON format. */
     public record AddedRecipe(ResourceLocation id, JsonElement json) {
@@ -39,6 +41,24 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
      * leaving the table's own loot untouched. Applied after remove/add.
      */
     public record LootModification(LootRule target, JsonArray pools) {
+    }
+
+    /**
+     * Rewrites every item entry matching 'from' (wildcards, or a '#tag' —
+     * items in the tag plus identical tag entries) to drop 'to' instead, in
+     * every loot table matching 'table' (null = all tables). Runs after
+     * remove/add/modify, so user-added pools are covered too.
+     */
+    public record LootItemReplacement(ItemMatch from, ResourceLocation to, @Nullable TableScope table,
+                                      String source) {
+    }
+
+    /**
+     * Deletes every item entry matching 'item' (wildcards or '#tag', like in
+     * replacements) from every loot table matching 'table' (null = all
+     * tables). The rest of the table is untouched.
+     */
+    public record LootItemRemoval(ItemMatch item, @Nullable TableScope table, String source) {
     }
 
     /**

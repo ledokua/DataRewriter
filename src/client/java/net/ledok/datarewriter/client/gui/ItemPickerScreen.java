@@ -42,7 +42,13 @@ public class ItemPickerScreen extends Screen {
     }
 
     public ItemPickerScreen(Screen parent, boolean fluids, boolean allowTags, Consumer<String> onPick) {
-        super(Component.literal(fluids ? "Choose a fluid" : "Choose an item"));
+        this(parent, fluids, allowTags,
+                Component.literal(fluids ? "Choose a fluid" : "Choose an item"), onPick);
+    }
+
+    public ItemPickerScreen(Screen parent, boolean fluids, boolean allowTags,
+                            Component title, Consumer<String> onPick) {
+        super(title);
         this.parent = parent;
         this.fluids = fluids;
         this.allowTags = allowTags;
@@ -123,9 +129,14 @@ public class ItemPickerScreen extends Screen {
     }
 
     private void pick(String ref) {
-        onPick.accept(ref);
         assert minecraft != null;
-        minecraft.setScreen(parent);
+        Screen before = minecraft.screen;
+        onPick.accept(ref);
+        // Return to the parent unless the callback already opened another
+        // screen (e.g. a second picker in a chained flow).
+        if (minecraft.screen == before) {
+            minecraft.setScreen(parent);
+        }
     }
 
     @Override

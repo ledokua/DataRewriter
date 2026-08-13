@@ -149,6 +149,28 @@ Rules AND-combine `id` (wildcards allowed) and `mod`, like recipe rules. Additio
 
 `modify` appends your pools to every matching table without touching its existing loot — the way RPG-style mods inject their drops everywhere. It targets like `remove` (`id` with wildcards, `mod`) and runs **after** remove/add, so it also applies to tables you added or emptied. To make an injected drop rare, weight it against a `minecraft:empty` entry like in the example, or use a `random_chance` condition on the pool.
 
+Two more operations work on **items across tables** instead of whole tables:
+
+```json5
+loot_tables: {
+  // Swap what item entries drop — everywhere, or only in matching tables.
+  replace_items: [
+    { from: "minecraft:diamond", to: "minecraft:emerald" },
+    { from: "uselessmod:*", to: "minecraft:stick", table: "minecraft:chests/*" },
+    // '!' excludes: everywhere except block and entity drops
+    { from: "minecraft:diamond", to: "minecraft:coal", table: "!*:blocks/*, !*:entities/*" },
+  ],
+  // Delete item entries; the rest of each table stays intact.
+  remove_items: [
+    "minecraft:ender_pearl",                                    // shorthand for { item: ... }
+    { item: "minecraft:string", table: "minecraft:entities/*" },
+    { item: "minecraft:gold_ingot", table: ["somemod:*", "!somemod:blocks/*"] },
+  ],
+}
+```
+
+`from`/`item` allow `*` wildcards **or a `#tag`** (e.g. `#c:fishes`): a tag matches every item that belongs to it, plus loot entries referencing the identical tag (replacing converts such a tag entry into the target item). Tag-based rules are applied right after startup/`/reload` finishes rather than during loading (item tags aren't bound yet at that point) — the effect is the same. `table` (optional) restricts which tables are touched: one or more patterns (comma-separated in a string, or a list), each with `*` wildcards, and a leading `!` **excludes** instead of includes — with only exclusions given, everything not excluded matches. These run **last**, so they also cover pools you added or injected. They find item entries anywhere in a table — including inside `alternatives`/`group` composites — and keep each entry's weight, count functions and conditions when replacing. (Tag entries and items referenced inside functions are not touched.)
+
 ## Recipe editor GUI
 
 If the mod is installed on your **client** too, you can create recipes visually instead of writing JSON: run `/recipeeditor` while in a world.
@@ -178,6 +200,7 @@ Hand-tuned layouts (drawn on the mod's own GUI where one exists) ship for:
 | [Let's Do] Herbal Brews | `kettle_brewing` (tea kettle GUI) | the dummy `cauldron_brewing` type is hidden |
 | Ube's Delight | `baking_mat` | tool, 3×3 ingredients, chance results, optional processing stages |
 | Runes | `crafting` (altar GUI) | smithing-style base + addition; OR-alternatives via `#tags` |
+| Potions LD | `potion_brewing` (alchemy table GUI) | 2×2 counted ingredients (scroll to set amounts) + result; upgrade slots are machine gear, not recipe data |
 
 ### Modded recipe types — automatic
 
@@ -230,6 +253,27 @@ An entry of just `{ type: "somemod:sometype", hidden: true }` removes that recip
 
 A commented example is generated at `config/datarewriter/editor-layouts/example.json5` on first use, and the files are re-read every time the editor opens, so you can tweak a layout and just reopen the screen.
 
+## Loot table editor GUI
+
+Loot tables get the same treatment as recipes: run `/loottableeditor` (client-side, op only) to browse and edit them visually. Loot tables are never synced to clients, so everything you see comes fresh from the server.
+
+- The picker lists **every loot table on the server** with a search box. Click one to edit it; typing an id that doesn't exist and pressing Enter creates a **new table** under that id.
+- **Filter by item** shows only the tables that actually drop a chosen item — the quick way to answer "where can diamonds come from?" before changing that. It also takes a `#tag` (e.g. `#c:fishes`): tables drop-matching **any item from the tag** (or the tag itself) are shown.
+- Choosing an item never means scrolling a giant list: click one in your **inventory**, drag one in from **EMI**, type an id (with `*` wildcards where the action supports patterns), or fall back to the searchable all-items list. Where tags make sense, **right-click an inventory item to pick one of its `#tags`** instead — no typing tag ids by hand.
+- **Replace item…** / **Remove item…** work across many loot tables at once: pick the item **or one of its tags** (right-click; a `#tag` covers every item in it), a replacement item if replacing, then choose **which tables** — every table, one mod (`somemod:*`), only chests, or anything *except* block/entity drops (`!*:blocks/*` — quick preset buttons cover the common cases). Entries keep their weights, counts and conditions when replaced. The operation is saved as a `replace_items`/`remove_items` rule in `config/datarewriter/gui-loot-tables.json5` — delete the rule there to undo it.
+- The editor shows the table's **pools** with entries as item slots. Scroll on an entry to change its **weight** (the tooltip shows its share of the pool), Shift+scroll for the **count**, Ctrl+scroll to grow a count **range** (1–3, …), Alt+scroll for a **drop chance**; middle-click types an exact weight — for item entries the same popup offers **Convert to #tag…**, listing every tag the item is in ("any planks instead of oak planks"). Scroll over the `rolls:` text to change how many entries a pool hands out (Shift makes it a range).
+- Click a slot to set its item (`#tags` work too) — or drop an item from the inventory panel or EMI **anywhere on a pool's card** to add it to that pool, or exactly on a slot to replace that entry. Right-click the `+` slot to add an **empty entry** (a weighted chance to drop nothing); right-click an entry deletes it, `✕` deletes a pool.
+- **Complex entries are editable too**: an `alternatives`/`group`/`sequence` entry shows as a bundle with its entry count — click it to open a sub-editor for its children (same controls, nesting included), and a nested `loot_table` reference shows as a chest — click it to pick a different target table. Middle-click a pool's `+` slot to **create** one of these. Anything beyond that (inline nested tables, `dynamic` entries, custom conditions) still shows as a locked slot and is **preserved exactly as-is**, same for fancy count/chance formulas.
+- **Save table** stores the whole table as a replacement (also the only way to keep edits/deletions of the table's *own* entries); with every pool deleted it saves an empty-table rule instead. **Save added pools** appends just your new pools, leaving the table's own loot to its mod — survives mod updates, like config `modify`. **Empty table** removes all pools *locally* — nothing is saved until you press Save table, and **Reload** discards unsaved edits and refetches the table.
+
+Saves are validated with the vanilla loot table parser, written to `config/datarewriter/gui-loot-tables.json5` (a normal config file) and **applied to the running server immediately** — kill the mob or open the chest and the new drops are live, no `/reload`.
+
+**Other mods that inject loot at runtime** (RPG-series equipment injectors and the like, via Fabric's loot events) are fully accounted for:
+
+- Injected pools **show up in the editor**, marked purple as "Injected — by \<mod\>?" (the mod is guessed from the ids inside the pool). They are read-only there: the injection is generated by that mod's own config, which is the place to restructure it.
+- `replace_items`/`remove_items` rules — from the config **and** from the GUI's bulk Replace/Remove item — **do apply to injected loot**: after the other mods' injections run, DataRewriter re-applies its item rules on top (at startup, after `/reload`, and immediately on a GUI bulk edit). So "replace all diamonds with emeralds" catches injected diamonds too.
+- Saving a table in the editor re-runs the mods' loot events on it, so injected loot survives live edits instead of disappearing until the next `/reload`.
+
 ## Finding ids in game
 
 You don't have to dig through mod jars to find recipe or loot table ids — as an operator, use:
@@ -237,8 +281,9 @@ You don't have to dig through mod jars to find recipe or loot table ids — as a
 - `/datarewriter list recipes` — every mod that has recipes, with counts; click a mod to drill in
 - `/datarewriter list recipes <mod> [page]` — its recipe ids, paginated with clickable prev/next; **click any id to copy it** to your clipboard, ready to paste into a config file
 - `/datarewriter list loot_tables [mod] [page]` — the same for loot tables
+- `/datarewriter errors` — every error and warning from the last config load, in chat (and printed to the server log again); `/reload` re-checks
 
-The command is registered server-side, so it works from a vanilla client. Listings reflect the current state (after your rules), so recipes you added under the `datarewriter:` namespace show up too.
+The commands are registered server-side, so they work from a vanilla client. Listings reflect the current state (after your rules), so recipes you added under the `datarewriter:` namespace show up too.
 
 ## Troubleshooting
 
@@ -249,10 +294,10 @@ The command is registered server-side, so it works from a vanilla client. Listin
 ## Notes for developers
 
 - Recipes are rewritten in two phases: `id`/`mod` rules and additions are applied to the raw recipe JSON map (mixin at the head of `RecipeManager.apply`), while `output`/`input`/`type` rules run after startup / `/reload` completes — item tags are not bound during recipe loading, so tag matching earlier would silently fail.
-- Loot tables are rewritten in the raw JSON map too (mixin in `SimpleJsonResourceReloadListener.scanDirectory`, filtered to the `loot_table` directory). That hook runs before recipes in vanilla's reload pipeline, so it's also where the config is (re)loaded.
+- Loot tables are rewritten in the raw JSON map too (mixin in `SimpleJsonResourceReloadListener.scanDirectory`, filtered to the `loot_table` directory). That hook runs before recipes in vanilla's reload pipeline, so it's also where the config is (re)loaded. The final JSON map is kept in memory — it's what the loot editor reads and searches.
+- Loot editor saves apply without a reload by rebinding the table's `Holder.Reference` inside the frozen reloadable registry (what vanilla itself does during load); brand-new ids briefly unfreeze the registry to register. Before binding, Fabric's `LootTableEvents` (REPLACE + MODIFY) are re-invoked on the freshly parsed table and the config's item rules are applied over the result, so runtime loot injections from other mods are preserved *and* covered by item rules; the JSON cache stays at the datapack level, so injections never stack. A post-injection pass (`LootInjectionRewriter`, from `SERVER_STARTED`/`END_DATA_PACK_RELOAD`) does the same on reload: it encodes each live table back to JSON with the vanilla codec, re-applies the item rules and rebinds tables where injected entries matched. The editor shows injected pools by diffing the live table's encoded pools against the datapack-level cache (the extra tail pools are the injected ones).
 - Targets 1.21.1 specifically. 1.21.2+ replaced `RecipeManager`'s internals (`RecipeMap`) and would need a different implementation.
 
 ## Ideas / future
 
 - More data sections in the same format (advancements? item tags?)
-- Loot `modify` operations beyond pool injection (e.g. filtering single items out of tables)

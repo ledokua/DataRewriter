@@ -1,7 +1,13 @@
 package net.ledok.datarewriter;
 
+import com.google.gson.JsonElement;
 import net.ledok.datarewriter.config.ConfigLoader;
 import net.ledok.datarewriter.config.RewriteConfig;
+import net.minecraft.resources.ResourceLocation;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -27,6 +33,22 @@ public final class RewriteState {
     public static volatile int lootAdded;
     public static volatile int lootReplaced;
     public static volatile int lootModified;
+    public static volatile int lootItemsReplaced;
+    public static volatile int lootItemsRemoved;
+
+    /**
+     * The final loot table JSON of the last (re)load, after all rewrites —
+     * what vanilla parsed. The loot editor reads tables from here and its
+     * saves update it, so it always mirrors the live tables.
+     */
+    public static volatile Map<ResourceLocation, JsonElement> lootTableJsons = new HashMap<>();
+
+    /**
+     * Lazy cache of LIVE tables encoded back to JSON — the datapack level
+     * plus everything other mods injected at runtime. Filled on demand by the
+     * editor's searches, cleared on reload, invalidated per table on rebinds.
+     */
+    public static volatile Map<ResourceLocation, JsonElement> runtimeTableJsons = new ConcurrentHashMap<>();
 
     private RewriteState() {
     }
@@ -51,6 +73,29 @@ public final class RewriteState {
     }
 
     /**
+     * Mirrors a bulk rule the GUI just wrote to gui-loot-tables.json5 into
+     * the in-memory config, so live applies see it before the next reload.
+     */
+    public static synchronized void appendLootItemReplacement(RewriteConfig.LootItemReplacement rule) {
+        RewriteConfig old = config();
+        List<RewriteConfig.LootItemReplacement> rules = new ArrayList<>(old.lootItemReplacements());
+        rules.add(rule);
+        config = new RewriteConfig(old.removals(), old.additions(), old.lootRemovals(),
+                old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
+                old.lootItemRemovals(), old.errorCount());
+    }
+
+    /** Same as {@link #appendLootItemReplacement} for remove_items rules. */
+    public static synchronized void appendLootItemRemoval(RewriteConfig.LootItemRemoval rule) {
+        RewriteConfig old = config();
+        List<RewriteConfig.LootItemRemoval> rules = new ArrayList<>(old.lootItemRemovals());
+        rules.add(rule);
+        config = new RewriteConfig(old.removals(), old.additions(), old.lootRemovals(),
+                old.lootAdditions(), old.lootModifications(), old.lootItemReplacements(),
+                List.copyOf(rules), old.errorCount());
+    }
+
+    /**
      * Sends a summary of what changed to online operators. Called after
      * /reload; on server start there is nobody to tell, the log covers it.
      */
@@ -58,7 +103,8 @@ public final class RewriteState {
         RewriteConfig loaded = config;
         boolean recipesInUse = !loaded.removals().isEmpty() || !loaded.additions().isEmpty();
         boolean lootInUse = !loaded.lootRemovals().isEmpty() || !loaded.lootAdditions().isEmpty()
-                || !loaded.lootModifications().isEmpty();
+                || !loaded.lootModifications().isEmpty()
+                || !loaded.lootItemReplacements().isEmpty() || !loaded.lootItemRemovals().isEmpty();
         if (!recipesInUse && !lootInUse && loaded.errorCount() == 0) {
             return; // mod not in use, stay quiet
         }
@@ -82,6 +128,12 @@ public final class RewriteState {
             }
             if (!loaded.lootModifications().isEmpty()) {
                 parts.add(lootModified + " modified");
+            }
+            if (!loaded.lootItemReplacements().isEmpty()) {
+                parts.add(lootItemsReplaced + " item entries replaced");
+            }
+            if (!loaded.lootItemRemovals().isEmpty()) {
+                parts.add(lootItemsRemoved + " item entries removed");
             }
             text.append("loot tables: ").append(String.join(", ", parts));
         }

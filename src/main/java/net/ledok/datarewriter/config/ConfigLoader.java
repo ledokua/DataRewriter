@@ -4,10 +4,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.JsonReader;
 import net.fabricmc.loader.api.FabricLoader;
 import net.ledok.datarewriter.Datarewriter;
 import net.minecraft.resources.ResourceLocation;
+import org.slf4j.helpers.MessageFormatter;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -25,12 +27,17 @@ import java.util.stream.Stream;
  */
 public final class ConfigLoader {
     private static int errors;
+    /** Errors and warnings of the load in progress. */
+    private static final List<String> issues = new ArrayList<>();
+    /** Snapshot of the last finished load, for /datarewriter errors. */
+    private static volatile List<String> lastIssues = List.of();
 
     private ConfigLoader() {
     }
 
     public static RewriteConfig load() {
         errors = 0;
+        issues.clear();
         Path dir = FabricLoader.getInstance().getConfigDir().resolve(Datarewriter.MOD_ID);
         try {
             if (!Files.isDirectory(dir)) {
@@ -38,8 +45,10 @@ public final class ConfigLoader {
                 Files.writeString(dir.resolve("example.json5"), EXAMPLE_FILE);
             }
         } catch (IOException e) {
-            Datarewriter.LOGGER.error("Could not create config directory {}", dir, e);
-            return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), 1);
+            error("Could not create config directory {}: {}", dir, e.getMessage());
+            lastIssues = List.copyOf(issues);
+            return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(),
+                    List.of(), List.of(), 1);
         }
 
         List<RewriteConfig.RemovalRule> removals = new ArrayList<>();
@@ -47,6 +56,8 @@ public final class ConfigLoader {
         List<RewriteConfig.LootRule> lootRemovals = new ArrayList<>();
         List<RewriteConfig.AddedLootTable> lootAdditions = new ArrayList<>();
         List<RewriteConfig.LootModification> lootModifications = new ArrayList<>();
+        List<RewriteConfig.LootItemReplacement> lootItemReplacements = new ArrayList<>();
+        List<RewriteConfig.LootItemRemoval> lootItemRemovals = new ArrayList<>();
 
         // editor-layouts/ holds the recipe editor's CLIENT-side layout files,
         // which are not rewrite rules.
@@ -62,27 +73,43 @@ public final class ConfigLoader {
                     .sorted()
                     .toList();
             for (Path file : files) {
-                loadFile(file, removals, additions, lootRemovals, lootAdditions, lootModifications);
+                loadFile(file, removals, additions, lootRemovals, lootAdditions, lootModifications,
+                        lootItemReplacements, lootItemRemovals);
             }
         } catch (IOException e) {
             error("Could not read config directory {}", dir, e);
         }
 
+        lastIssues = List.copyOf(issues);
         return new RewriteConfig(List.copyOf(removals), List.copyOf(additions),
                 List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
+                List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                 errors);
+    }
+
+    /** Errors and warnings of the last config load, for /datarewriter errors. */
+    public static List<String> issues() {
+        return lastIssues;
     }
 
     private static void error(String format, Object... args) {
         errors++;
+        issues.add("ERROR: " + MessageFormatter.arrayFormat(format, args).getMessage());
         Datarewriter.LOGGER.error(format, args);
+    }
+
+    private static void warn(String format, Object... args) {
+        issues.add("WARN: " + MessageFormatter.arrayFormat(format, args).getMessage());
+        Datarewriter.LOGGER.warn(format, args);
     }
 
     private static void loadFile(Path file, List<RewriteConfig.RemovalRule> removals,
                                  List<RewriteConfig.AddedRecipe> additions,
                                  List<RewriteConfig.LootRule> lootRemovals,
                                  List<RewriteConfig.AddedLootTable> lootAdditions,
-                                 List<RewriteConfig.LootModification> lootModifications) {
+                                 List<RewriteConfig.LootModification> lootModifications,
+                                 List<RewriteConfig.LootItemReplacement> lootItemReplacements,
+                                 List<RewriteConfig.LootItemRemoval> lootItemRemovals) {
         String fileName = file.getFileName().toString();
         JsonObject root;
         try {
@@ -109,7 +136,8 @@ public final class ConfigLoader {
         }
         if (root.has("loot_tables")) {
             if (root.get("loot_tables") instanceof JsonObject lootTables) {
-                readLootSection(lootTables, fileName, lootRemovals, lootAdditions, lootModifications);
+                readLootSection(lootTables, fileName, lootRemovals, lootAdditions, lootModifications,
+                        lootItemReplacements, lootItemRemovals);
             } else {
                 error("[{}] 'loot_tables' must be an object with 'remove' and/or 'add' lists", fileName);
             }
@@ -119,7 +147,7 @@ public final class ConfigLoader {
             if (key.equals("remove") || key.equals("add")) {
                 error("[{}] '{}' must be inside a 'recipes: { ... }' section, ignoring it", fileName, key);
             } else if (!key.equals("recipes") && !key.equals("loot_tables")) {
-                Datarewriter.LOGGER.warn("[{}] Unknown section '{}' (expected 'recipes' or 'loot_tables')",
+                warn("[{}] Unknown section '{}' (expected 'recipes' or 'loot_tables')",
                         fileName, key);
             }
         }
@@ -128,7 +156,9 @@ public final class ConfigLoader {
     private static void readLootSection(JsonObject lootTables, String fileName,
                                         List<RewriteConfig.LootRule> lootRemovals,
                                         List<RewriteConfig.AddedLootTable> lootAdditions,
-                                        List<RewriteConfig.LootModification> lootModifications) {
+                                        List<RewriteConfig.LootModification> lootModifications,
+                                        List<RewriteConfig.LootItemReplacement> lootItemReplacements,
+                                        List<RewriteConfig.LootItemRemoval> lootItemRemovals) {
         if (lootTables.has("remove")) {
             readLootRemovals(lootTables.get("remove"), fileName, lootRemovals);
         }
@@ -138,11 +168,97 @@ public final class ConfigLoader {
         if (lootTables.has("modify")) {
             readLootModifications(lootTables.get("modify"), fileName, lootModifications);
         }
+        if (lootTables.has("replace_items")) {
+            readLootItemReplacements(lootTables.get("replace_items"), fileName, lootItemReplacements);
+        }
+        if (lootTables.has("remove_items")) {
+            readLootItemRemovals(lootTables.get("remove_items"), fileName, lootItemRemovals);
+        }
         for (String key : lootTables.keySet()) {
-            if (!List.of("remove", "add", "modify").contains(key)) {
-                Datarewriter.LOGGER.warn("[{}] loot_tables: unknown key '{}' "
-                        + "(expected 'remove', 'add' or 'modify')", fileName, key);
+            if (!List.of("remove", "add", "modify", "replace_items", "remove_items").contains(key)) {
+                warn("[{}] loot_tables: unknown key '{}' "
+                        + "(expected 'remove', 'add', 'modify', 'replace_items' or 'remove_items')",
+                        fileName, key);
             }
+        }
+    }
+
+    private static void readLootItemReplacements(JsonElement element, String fileName,
+                                                 List<RewriteConfig.LootItemReplacement> out) {
+        if (!(element instanceof JsonArray array)) {
+            error("[{}] loot_tables 'replace_items' must be a list", fileName);
+            return;
+        }
+        int index = 0;
+        for (JsonElement entry : array) {
+            index++;
+            if (entry.isJsonNull()) {
+                continue;
+            }
+            if (!(entry instanceof JsonObject obj)) {
+                error("[{}] loot_tables replace_items[{}] must be an object", fileName, index);
+                continue;
+            }
+            ItemMatch from = readItemMatch(obj, "from", fileName, "replace_items", index);
+            ResourceLocation to = readId(obj, "to", fileName, index);
+            TableScope table = readTableScope(obj, fileName, "replace_items", index);
+            for (String key : obj.keySet()) {
+                if (!List.of("from", "to", "table").contains(key)) {
+                    warn("[{}] loot_tables replace_items[{}]: unknown key '{}'",
+                            fileName, index, key);
+                }
+            }
+            if (from == null || to == null) {
+                error("[{}] loot_tables replace_items[{}] needs 'from' (item id with '*' wildcards, "
+                        + "or a '#tag') and 'to' (exact item id)", fileName, index);
+                continue;
+            }
+            out.add(new RewriteConfig.LootItemReplacement(from, to, table, fileName));
+        }
+    }
+
+    private static void readLootItemRemovals(JsonElement element, String fileName,
+                                             List<RewriteConfig.LootItemRemoval> out) {
+        if (!(element instanceof JsonArray array)) {
+            error("[{}] loot_tables 'remove_items' must be a list", fileName);
+            return;
+        }
+        int index = 0;
+        for (JsonElement entry : array) {
+            index++;
+            if (entry.isJsonNull()) {
+                continue;
+            }
+            // A bare string is shorthand for { item: "..." }.
+            ItemMatch item;
+            TableScope table = null;
+            if (entry instanceof JsonPrimitive primitive && primitive.isString()) {
+                item = ItemMatch.parse(primitive.getAsString());
+                if (item == null) {
+                    error("[{}] loot_tables remove_items[{}]: '{}' is not a valid item id, "
+                            + "pattern or #tag", fileName, index, primitive.getAsString());
+                    continue;
+                }
+            } else if (entry instanceof JsonObject obj) {
+                item = readItemMatch(obj, "item", fileName, "remove_items", index);
+                table = readTableScope(obj, fileName, "remove_items", index);
+                for (String key : obj.keySet()) {
+                    if (!List.of("item", "table").contains(key)) {
+                        warn("[{}] loot_tables remove_items[{}]: unknown key '{}'",
+                                fileName, index, key);
+                    }
+                }
+                if (item == null) {
+                    error("[{}] loot_tables remove_items[{}] needs 'item' (id with '*' wildcards, "
+                            + "or a '#tag')", fileName, index);
+                    continue;
+                }
+            } else {
+                error("[{}] loot_tables remove_items[{}] must be an item id string or an object",
+                        fileName, index);
+                continue;
+            }
+            out.add(new RewriteConfig.LootItemRemoval(item, table, fileName));
         }
     }
 
@@ -166,7 +282,7 @@ public final class ConfigLoader {
             String mod = readString(obj, "mod");
             for (String key : obj.keySet()) {
                 if (!List.of("id", "mod", "pools").contains(key)) {
-                    Datarewriter.LOGGER.warn("[{}] loot_tables modify[{}]: unknown key '{}'",
+                    warn("[{}] loot_tables modify[{}]: unknown key '{}'",
                             fileName, index, key);
                 }
             }
@@ -204,7 +320,7 @@ public final class ConfigLoader {
             String mod = readString(obj, "mod");
             for (String key : obj.keySet()) {
                 if (!key.equals("id") && !key.equals("mod")) {
-                    Datarewriter.LOGGER.warn("[{}] loot_tables remove[{}]: unknown condition '{}'",
+                    warn("[{}] loot_tables remove[{}]: unknown condition '{}'",
                             fileName, index, key);
                 }
             }
@@ -260,7 +376,7 @@ public final class ConfigLoader {
         }
         for (String key : recipes.keySet()) {
             if (!key.equals("remove") && !key.equals("add")) {
-                Datarewriter.LOGGER.warn("[{}] recipes: unknown key '{}' (expected 'remove' or 'add')",
+                warn("[{}] recipes: unknown key '{}' (expected 'remove' or 'add')",
                         fileName, key);
             }
         }
@@ -289,7 +405,7 @@ public final class ConfigLoader {
             String input = readItemRef(obj, "input", fileName, index);
             for (String key : obj.keySet()) {
                 if (!List.of("id", "type", "mod", "output", "input").contains(key)) {
-                    Datarewriter.LOGGER.warn("[{}] remove[{}]: unknown condition '{}'", fileName, index, key);
+                    warn("[{}] remove[{}]: unknown condition '{}'", fileName, index, key);
                 }
             }
             if (id == null && type == null && mod == null && output == null && input == null) {
@@ -348,6 +464,21 @@ public final class ConfigLoader {
     }
 
     /** An exact id or a pattern with '*' wildcards. */
+    /** Reads an item id / '*' pattern / '#tag' for a bulk item rule. */
+    private static ItemMatch readItemMatch(JsonObject obj, String key, String fileName,
+                                           String listName, int index) {
+        String value = readString(obj, key);
+        if (value == null) {
+            return null;
+        }
+        ItemMatch match = ItemMatch.parse(value);
+        if (match == null) {
+            error("[{}] loot_tables {}[{}]: '{}' is not a valid item id, pattern or #tag",
+                    fileName, listName, index, value);
+        }
+        return match;
+    }
+
     private static IdPattern readIdPattern(JsonObject obj, String key, String fileName, int index) {
         String value = readString(obj, key);
         if (value == null) {
@@ -358,6 +489,39 @@ public final class ConfigLoader {
             error("[{}] entry {}: '{}' is not a valid id or pattern: {}", fileName, index, key, value);
         }
         return pattern;
+    }
+
+    /**
+     * Reads the optional 'table' scope of a bulk item rule: a pattern string
+     * (comma-separated, '!' excludes) or a list of such patterns.
+     */
+    private static TableScope readTableScope(JsonObject obj, String fileName, String listName, int index) {
+        JsonElement value = obj.get("table");
+        if (value == null || value.isJsonNull()) {
+            return null;
+        }
+        TableScope scope = null;
+        if (value instanceof JsonPrimitive primitive && primitive.isString()) {
+            scope = TableScope.parse(primitive.getAsString());
+        } else if (value instanceof JsonArray array) {
+            List<String> parts = new ArrayList<>();
+            StringBuilder source = new StringBuilder();
+            for (JsonElement part : array) {
+                if (!(part instanceof JsonPrimitive p && p.isString())) {
+                    error("[{}] loot_tables {}[{}]: 'table' list entries must be strings",
+                            fileName, listName, index);
+                    return null;
+                }
+                parts.add(p.getAsString());
+                source.append(source.isEmpty() ? "" : ", ").append(p.getAsString());
+            }
+            scope = TableScope.parse(parts, source.toString());
+        }
+        if (scope == null) {
+            error("[{}] loot_tables {}[{}]: 'table' must be a loot table id/pattern "
+                    + "(comma-separated, '!' excludes) or a list of them", fileName, listName, index);
+        }
+        return scope;
     }
 
     private static ResourceLocation readId(JsonObject obj, String key, String fileName, int index) {
@@ -543,6 +707,29 @@ public final class ConfigLoader {
                   //     ],
                   //   }],
                   // },
+                ],
+
+                // Swap what item entries drop, across every loot table (or only
+                // tables matching "table"). 'from' allows '*' wildcards or a
+                // "#tag" (matches every item in the tag, plus identical tag
+                // entries); "table" is one or more patterns (comma-separated or
+                // a list) and a leading '!' excludes instead of includes.
+                replace_items: [
+                  // { from: "minecraft:diamond", to: "minecraft:emerald" },
+                  // { from: "uselessmod:*", to: "minecraft:stick", table: "minecraft:chests/*" },
+                  // { from: "minecraft:diamond", to: "minecraft:coal", table: "!*:blocks/*, !*:entities/*" },
+                  // { from: "#c:fishes", to: "minecraft:cod" },
+                ],
+
+                // Delete item entries from loot tables; the rest of each table
+                // stays intact. A bare string means { item: "..." }; "table"
+                // scopes like in replace_items.
+                remove_items: [
+                  // "minecraft:diamond",
+                  // "#minecraft:music_discs",
+                  // { item: "uselessmod:*" },
+                  // { item: "minecraft:emerald", table: "minecraft:entities/*" },
+                  // { item: "minecraft:gold_ingot", table: ["somemod:*", "!somemod:blocks/*"] },
                 ],
               },
             }
