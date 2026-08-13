@@ -955,6 +955,15 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             graphics.drawString(font, text, 32 - font.width(text), 1, 0x55FFFF, true);
             graphics.pose().popPose();
         }
+        if (entry.kind == Kind.TAG) {
+            // Tag entries cycle their icon through the tag's items — the '#'
+            // badge marks that this is a tag, not one specific item.
+            graphics.pose().pushPose();
+            graphics.pose().translate(x, y, 200);
+            graphics.pose().scale(0.5f, 0.5f, 1);
+            graphics.drawString(font, "#", 1, 23, 0xFFAA00, true);
+            graphics.pose().popPose();
+        }
     }
 
     private static Item complexIcon(EntryState entry) {
@@ -997,9 +1006,16 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     + "Bulk Replace/Remove item DOES cover it.").withStyle(ChatFormatting.GRAY));
         }
         switch (entry.kind) {
-            case ITEM, TAG -> {
+            case ITEM -> {
                 lines.add(RecipeEditorScreen.iconFor(entry.ref, false).getHoverName());
                 lines.add(Component.literal(entry.ref).withStyle(ChatFormatting.DARK_GRAY));
+            }
+            case TAG -> {
+                lines.add(Component.literal(entry.ref).withStyle(ChatFormatting.GOLD));
+                lines.add(Component.literal("An item TAG — each roll drops one matching item "
+                        + "(the icon cycles through them).").withStyle(ChatFormatting.GRAY));
+                lines.add(Component.literal("Bulk Replace/Remove must target the #tag itself, "
+                        + "not an item inside it.").withStyle(ChatFormatting.GRAY));
             }
             case EMPTY -> lines.add(Component.literal("Nothing (an 'empty' entry — a chance to "
                     + "get no drop). Click to turn it into an item."));

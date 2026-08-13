@@ -155,9 +155,14 @@ public class CompositeEntryScreen extends AbstractContainerScreen<LootEditorMenu
     private List<Component> childTooltip(EntryState child) {
         List<Component> lines = new ArrayList<>();
         switch (child.kind) {
-            case ITEM, TAG -> {
+            case ITEM -> {
                 lines.add(RecipeEditorScreen.iconFor(child.ref, false).getHoverName());
                 lines.add(Component.literal(child.ref).withStyle(ChatFormatting.DARK_GRAY));
+            }
+            case TAG -> {
+                lines.add(Component.literal(child.ref).withStyle(ChatFormatting.GOLD));
+                lines.add(Component.literal("An item TAG — each roll drops one matching item "
+                        + "(the icon cycles through them).").withStyle(ChatFormatting.GRAY));
             }
             case EMPTY -> lines.add(Component.literal("Nothing — a chance to get no drop. "
                     + "Click to turn it into an item."));
