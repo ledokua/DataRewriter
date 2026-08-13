@@ -1009,7 +1009,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     + "Bulk Replace/Remove item DOES cover it.").withStyle(ChatFormatting.GRAY));
             if (entry.kind == Kind.ITEM) {
                 lines.add(Component.literal("Injecting mods usually expand a config #tag into "
-                        + "single items like this one — target the item id, not the tag.")
+                        + "single items like this one — removing/replacing by item id or by "
+                        + "a #tag containing it both catch it.")
                         .withStyle(ChatFormatting.GRAY));
             }
         }
