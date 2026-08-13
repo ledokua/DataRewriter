@@ -4,6 +4,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -15,7 +16,6 @@ import net.minecraft.world.level.material.Fluid;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Consumer;
 
 /**
@@ -69,6 +69,9 @@ public class ItemPickerScreen extends Screen {
         searchBox.setMaxLength(128);
         searchBox.setHint(Component.literal(allowTags ? "search — #… for tags" : "search")
                 .withStyle(ChatFormatting.DARK_GRAY));
+        searchBox.setTooltip(Tooltip.create(Component.literal(
+                "All space-separated words must match; @mod filters by namespace "
+                        + "— e.g. '@minecraft sword'")));
         searchBox.setValue(query);
         searchBox.setResponder(text -> {
             query = text;
@@ -84,13 +87,13 @@ public class ItemPickerScreen extends Screen {
     }
 
     private void refresh() {
-        String q = query.trim().toLowerCase(Locale.ROOT);
+        String q = query.trim();
         List<Entry> found = new ArrayList<>();
         if (q.startsWith("#") && allowTags) {
             String tagQuery = q.substring(1);
             (fluids ? BuiltInRegistries.FLUID.getTagNames() : BuiltInRegistries.ITEM.getTagNames())
                     .map(tag -> tag.location().toString())
-                    .filter(id -> id.contains(tagQuery))
+                    .filter(id -> SearchQuery.matches(tagQuery, id))
                     .sorted()
                     .forEach(id -> found.add(new Entry("#" + id, Component.literal("#" + id))));
         } else if (fluids) {
@@ -104,8 +107,7 @@ public class ItemPickerScreen extends Screen {
                         String id = e.getKey().location().toString();
                         Component name = fluid.getBucket() == Items.AIR
                                 ? Component.literal(id) : fluid.getBucket().getDescription();
-                        if (q.isEmpty() || id.contains(q)
-                                || name.getString().toLowerCase(Locale.ROOT).contains(q)) {
+                        if (q.isEmpty() || SearchQuery.matches(q, id, name.getString())) {
                             found.add(new Entry(id, name));
                         }
                     });
@@ -118,8 +120,7 @@ public class ItemPickerScreen extends Screen {
                         }
                         String id = e.getKey().location().toString();
                         Component name = e.getValue().getDescription();
-                        if (q.isEmpty() || id.contains(q)
-                                || name.getString().toLowerCase(Locale.ROOT).contains(q)) {
+                        if (q.isEmpty() || SearchQuery.matches(q, id, name.getString())) {
                             found.add(new Entry(id, name));
                         }
                     });

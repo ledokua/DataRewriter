@@ -1,18 +1,15 @@
 package net.ledok.datarewriter.client.gui;
 
-import net.ledok.datarewriter.config.IdPattern;
 import net.ledok.datarewriter.menu.LootEditorMenu;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
@@ -24,40 +21,33 @@ import java.util.function.Consumer;
 
 /**
  * "Pick one item" step used by the loot table picker's filter and bulk
- * actions: click an item in your inventory, drag one in from EMI, type an id
- * (with '*' wildcards where the action supports patterns), or fall back to
- * the full searchable item list. A container screen so EMI shows its panel
- * next to it (the menu is client-only, nothing is moved or consumed).
+ * actions: click an item in your inventory (right-click picks one of its
+ * #tags instead), drag one in from EMI, or fall back to the full searchable
+ * item list. A container screen so EMI shows its panel next to it (the menu
+ * is client-only, nothing is moved or consumed).
  */
 public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
     private static final int COLS = 9;
     private static final int ROWS = 4;
 
     private final Screen parent;
-    private final boolean allowPattern;
     private final boolean allowTags;
     private final Consumer<String> onPick;
-
-    private EditBox idBox;
-    private Component status = Component.empty();
 
     private int gridLeft;
     private int gridTop;
     private int uiTop;
     private int uiBottom;
-    private int statusY;
 
-    public ItemSelectScreen(Screen parent, Component prompt, boolean allowPattern,
-                            Consumer<String> onPick) {
-        this(parent, prompt, allowPattern, false, onPick);
+    public ItemSelectScreen(Screen parent, Component prompt, Consumer<String> onPick) {
+        this(parent, prompt, false, onPick);
     }
 
-    public ItemSelectScreen(Screen parent, Component prompt, boolean allowPattern,
-                            boolean allowTags, Consumer<String> onPick) {
+    public ItemSelectScreen(Screen parent, Component prompt, boolean allowTags,
+                            Consumer<String> onPick) {
         super(new LootEditorMenu(0, Minecraft.getInstance().player.getInventory()),
                 Minecraft.getInstance().player.getInventory(), prompt);
         this.parent = parent;
-        this.allowPattern = allowPattern;
         this.allowTags = allowTags;
         this.onPick = onPick;
     }
@@ -67,23 +57,10 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
         super.init();
         int gridW = COLS * 18;
         gridLeft = (width - gridW) / 2;
-        uiTop = Math.max(6, (height - 210) / 2);
+        uiTop = Math.max(6, (height - 170) / 2);
         gridTop = uiTop + 40;
 
         int y = gridTop + ROWS * 18 + 18;
-        idBox = new EditBox(font, gridLeft, y, gridW - 54, 18, Component.literal("Item id"));
-        idBox.setMaxLength(256);
-        idBox.setHint(Component.literal(
-                        (allowPattern ? "type an id — '*' wildcards ok" : "type an item id")
-                                + (allowTags ? ", #… for tags" : ""))
-                .withStyle(ChatFormatting.DARK_GRAY));
-        idBox.setResponder(text -> status = Component.empty());
-        addRenderableWidget(idBox);
-
-        addRenderableWidget(Button.builder(Component.literal("OK"), b -> confirmTyped())
-                .bounds(gridLeft + gridW - 50, y - 1, 50, 20)
-                .build());
-        y += 24;
         addRenderableWidget(Button.builder(Component.literal("Search all items…"), b -> {
                     assert minecraft != null;
                     minecraft.setScreen(new ItemPickerScreen(parent, false, allowTags, title, this::deliver));
@@ -95,58 +72,12 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
                 .bounds(gridLeft + gridW / 2 + 2, y, gridW / 2 - 2, 20)
                 .build());
-        statusY = y + 26;
-        uiBottom = statusY + 14;
+        uiBottom = y + 26;
 
         leftPos = gridLeft - 8;
         topPos = uiTop;
         imageWidth = gridW + 16;
         imageHeight = uiBottom - uiTop;
-    }
-
-    private void confirmTyped() {
-        String text = idBox.getValue().trim();
-        if (text.isEmpty()) {
-            return;
-        }
-        if (text.startsWith("#")) {
-            if (!allowTags) {
-                status = Component.literal("This needs an item — no #tags here.")
-                        .withStyle(ChatFormatting.RED);
-                return;
-            }
-            String tag = text.substring(1);
-            ResourceLocation tagId = ResourceLocation.tryParse(
-                    tag.contains(":") ? tag : "minecraft:" + tag);
-            if (tagId == null) {
-                status = Component.literal("'" + text + "' is not a valid tag id.")
-                        .withStyle(ChatFormatting.RED);
-                return;
-            }
-            deliver("#" + tagId);
-            return;
-        }
-        if (text.contains("*")) {
-            if (!allowPattern) {
-                status = Component.literal("This needs one exact item — no '*' wildcards here.")
-                        .withStyle(ChatFormatting.RED);
-                return;
-            }
-            if (IdPattern.parse(text) == null) {
-                status = Component.literal("'" + text + "' is not a valid item pattern.")
-                        .withStyle(ChatFormatting.RED);
-                return;
-            }
-            deliver(text);
-            return;
-        }
-        ResourceLocation id = ResourceLocation.tryParse(text);
-        if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) {
-            status = Component.literal("No item with id '" + text + "'.")
-                    .withStyle(ChatFormatting.RED);
-            return;
-        }
-        deliver(id.toString());
     }
 
     private void deliver(String ref) {
@@ -191,9 +122,6 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
             }
         }
 
-        if (!status.getString().isEmpty()) {
-            graphics.drawCenteredString(font, status, width / 2, statusY, 0xFFFFFF);
-        }
         if (!hovered.isEmpty()) {
             List<Component> lines = new ArrayList<>();
             lines.add(hovered.getHoverName());
@@ -232,21 +160,6 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
             return true;
         }
         return super.mouseClicked(mouseX, mouseY, button);
-    }
-
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if ((keyCode == 257 || keyCode == 335) && idBox.isFocused()) { // enter
-            confirmTyped();
-            return true;
-        }
-        // AbstractContainerScreen closes on the inventory key ('E'), which
-        // must not happen while typing in the text box.
-        if (keyCode != 256 && getFocused() instanceof EditBox box && box.canConsumeInput()) {
-            box.keyPressed(keyCode, scanCode, modifiers);
-            return true;
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     // --- EMI hooks --------------------------------------------------------

@@ -13,7 +13,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Consumer;
 
 /**
@@ -86,6 +85,9 @@ public class LootTablePickerScreen extends Screen {
         searchBox.setMaxLength(256);
         searchBox.setHint(Component.literal("search — Enter on a full id creates a new table")
                 .withStyle(ChatFormatting.DARK_GRAY));
+        searchBox.setTooltip(Tooltip.create(Component.literal(
+                "All space-separated words must match; @mod filters by namespace "
+                        + "— e.g. '@minecraft end'")));
         searchBox.setValue(query);
         searchBox.setResponder(text -> {
             query = text;
@@ -148,7 +150,7 @@ public class LootTablePickerScreen extends Screen {
     private void pickItemFilter() {
         assert minecraft != null;
         minecraft.setScreen(new ItemSelectScreen(this,
-                Component.literal("Show tables dropping which item?"), true, true, ref -> {
+                Component.literal("Show tables dropping which item?"), true, ref -> {
             itemFilter = ref;
             requestList();
             rebuildWidgets();
@@ -158,9 +160,9 @@ public class LootTablePickerScreen extends Screen {
     private void bulkReplace() {
         assert minecraft != null;
         minecraft.setScreen(new ItemSelectScreen(this,
-                Component.literal("Replace which item (or #tag)?"), true, true, from ->
+                Component.literal("Replace which item (or #tag)?"), true, from ->
                 minecraft.setScreen(new ItemSelectScreen(this,
-                        Component.literal("Replace with which item?"), false, to ->
+                        Component.literal("Replace with which item?"), to ->
                         minecraft.setScreen(new TableScopeScreen(this, tables ->
                                 confirm("Replace " + from + " with " + to + scopeText(tables) + "?",
                                         new LootPayloads.BulkItemEdit(from, to, tables))))))));
@@ -169,7 +171,7 @@ public class LootTablePickerScreen extends Screen {
     private void bulkRemove() {
         assert minecraft != null;
         minecraft.setScreen(new ItemSelectScreen(this,
-                Component.literal("Remove which item (or #tag) from loot tables?"), true, true, item ->
+                Component.literal("Remove which item (or #tag) from loot tables?"), true, item ->
                 minecraft.setScreen(new TableScopeScreen(this, tables ->
                         confirm("Remove " + item + scopeText(tables) + "?",
                                 new LootPayloads.BulkItemEdit(item, "", tables))))));
@@ -196,9 +198,9 @@ public class LootTablePickerScreen extends Screen {
     }
 
     private void refresh() {
-        String q = query.trim().toLowerCase(Locale.ROOT);
+        String q = query.trim();
         filtered = q.isEmpty() ? ids : ids.stream()
-                .filter(id -> id.toLowerCase(Locale.ROOT).contains(q))
+                .filter(id -> SearchQuery.matches(q, id))
                 .toList();
         scrollRow = 0;
     }
