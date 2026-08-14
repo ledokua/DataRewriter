@@ -602,6 +602,11 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             lines.add(Component.literal(slotLabel(slot))
                     .append(slot.required() ? " (required)" : "").withStyle(ChatFormatting.WHITE));
             lines.add(Component.literal("Click to choose").withStyle(ChatFormatting.GRAY));
+            if (slot.acceptsTags() && !slot.format().fluid()) {
+                lines.add(Component.literal("#tags work here — type # in the item list, or "
+                        + "right/middle-click an inventory item for its tags")
+                        .withStyle(ChatFormatting.GRAY));
+            }
         } else {
             lines.add(Component.literal(slotLabel(slot) + ": ").withStyle(ChatFormatting.GRAY)
                     .append(iconFor(ref, slot.format().fluid()).getHoverName()));
