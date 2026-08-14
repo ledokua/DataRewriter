@@ -618,6 +618,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 lines.add(Component.literal("Chance: " + chances()[index] + "%")
                         .withStyle(ChatFormatting.AQUA));
             }
+            if (slot.acceptsTags() && !slot.format().fluid() && !ref.startsWith("#")) {
+                lines.add(Component.literal("Middle-click: convert to one of its #tags")
+                        .withStyle(ChatFormatting.GRAY));
+            }
             lines.add(Component.literal("Right-click to clear").withStyle(ChatFormatting.GRAY));
         }
         if (slot.format().counted && layout.kind == Kind.SLOTS) {
@@ -689,17 +693,36 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             refs()[index] = null;
             return true;
         }
-        if (button == 2 && refs()[index] != null && slot.format().counted
-                && !(layout.kind != Kind.SLOTS && !slot.result())) {
-            // Middle-click: type an exact amount instead of scrolling.
+        if (button == 2 && refs()[index] != null) {
             assert minecraft != null;
             final int slotIndex = index;
-            boolean fluid = slot.format().fluid();
-            minecraft.setScreen(new AmountInputScreen(this,
-                    Component.literal(slotLabel(slot) + (fluid ? " (mB)" : " (count)")),
-                    counts()[index], 1, fluid ? 1_000_000 : 99,
-                    amount -> counts()[slotIndex] = amount));
-            return true;
+            boolean countEditable = slot.format().counted
+                    && !(layout.kind != Kind.SLOTS && !slot.result());
+            // An item in a tag-capable slot can be converted to one of its
+            // #tags, like a loot entry (MMB muscle memory).
+            Runnable toTag = slot.acceptsTags() && !slot.format().fluid()
+                    && !refs()[index].startsWith("#")
+                    ? () -> minecraft.setScreen(new ItemTagListScreen(this,
+                            iconFor(refs()[slotIndex], false).getItem(),
+                            tag -> refs()[slotIndex] = tag))
+                    : null;
+            if (countEditable) {
+                // Middle-click: type an exact amount instead of scrolling.
+                boolean fluid = slot.format().fluid();
+                Component label = Component.literal(slotLabel(slot) + (fluid ? " (mB)" : " (count)"));
+                int max = fluid ? 1_000_000 : 99;
+                minecraft.setScreen(toTag == null
+                        ? new AmountInputScreen(this, label, counts()[index], 1, max,
+                                amount -> counts()[slotIndex] = amount)
+                        : new AmountInputScreen(this, label, counts()[index], 1, max,
+                                amount -> counts()[slotIndex] = amount,
+                                Component.literal("Convert to #tag…"), toTag));
+                return true;
+            }
+            if (toTag != null) {
+                toTag.run();
+                return true;
+            }
         }
         if (button == 0) {
             if (cursorTag != null) {
