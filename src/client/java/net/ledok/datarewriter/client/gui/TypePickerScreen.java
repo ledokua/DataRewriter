@@ -4,11 +4,11 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Consumer;
 
 /** Searchable list of every recipe type the editor knows a layout for. */
@@ -20,9 +20,13 @@ public class TypePickerScreen extends Screen {
     private final List<EditorLayout> layouts;
     private final Consumer<EditorLayout> onPick;
 
-    private String query = "";
+    private static String lastQuery = "";
+    private static int lastScroll;
+
+    private String query = lastQuery;
     private List<EditorLayout> filtered;
     private int scrollRow;
+    private boolean restoreScroll = true;
 
     public TypePickerScreen(Screen parent, List<EditorLayout> layouts, Consumer<EditorLayout> onPick) {
         super(Component.literal("Choose a recipe type"));
@@ -49,6 +53,9 @@ public class TypePickerScreen extends Screen {
         EditBox searchBox = new EditBox(font, listLeft(), 30, LIST_WIDTH, 18, Component.literal("Search"));
         searchBox.setMaxLength(128);
         searchBox.setHint(Component.literal("search by name or id").withStyle(ChatFormatting.DARK_GRAY));
+        searchBox.setTooltip(Tooltip.create(Component.literal(
+                "All space-separated words must match; @mod filters by namespace "
+                        + "— e.g. '@create mixing'")));
         searchBox.setValue(query);
         searchBox.setResponder(text -> {
             query = text;
@@ -64,12 +71,19 @@ public class TypePickerScreen extends Screen {
     }
 
     private void refresh() {
-        String q = query.trim().toLowerCase(Locale.ROOT);
+        String q = query.trim();
         filtered = q.isEmpty() ? layouts : layouts.stream()
-                .filter(l -> l.typeId.toLowerCase(Locale.ROOT).contains(q)
-                        || l.displayName.toLowerCase(Locale.ROOT).contains(q))
+                .filter(l -> SearchQuery.matches(q, l.typeId, l.displayName))
                 .toList();
-        scrollRow = 0;
+        scrollRow = restoreScroll ? Math.max(0, Math.min(lastScroll, filtered.size() - visibleRows())) : 0;
+        restoreScroll = false;
+    }
+
+    @Override
+    public void removed() {
+        lastQuery = query;
+        lastScroll = scrollRow;
+        super.removed();
     }
 
     private void pick(EditorLayout layout) {

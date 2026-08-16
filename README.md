@@ -194,7 +194,7 @@ If the mod is installed on your **client** too, you can create recipes visually 
 - With **EMI** installed, its panels show up next to the editor and you can drag any item or fluid from them straight into a slot, like an AE2 pattern terminal — compatible slots light up green while dragging. Even better: open any recipe in EMI and click its **fill (+) button** to load that recipe into the editor — slots, amounts, chances, fields, and the id, ready to tweak and save (which replaces the original; clear the id to save a copy instead). (Optional; nothing is required at runtime.)
 - Middle-click a filled slot to **type an exact amount** (count or mB) instead of scrolling.
 - Optionally give the recipe an id (an existing id **replaces** that recipe), fill in any extra fields (XP, cooking time, …), and hit **Save recipe**. The editor stays open, so you can keep making recipes; **Clear** empties the current pattern.
-- Closing and reopening the editor brings back your last recipe type, slot contents, amounts, and field values (kept until the game quits).
+- Closing and reopening the editor brings back your last recipe type, slot contents, amounts, and field values (kept until the game quits). The "Search all items" and recipe-type pickers also remember their last search and scroll position.
 
 Saving sends the recipe to the server (op only), where it is validated by the real recipe parser, appended to `config/datarewriter/gui-recipes.json5` — a normal config file you can edit later — and **applied immediately** to the running game (no `/reload`; the recipe is live and synced to all players the moment you save). Nothing extra is needed on other players' clients or on the server beyond the mod itself.
 

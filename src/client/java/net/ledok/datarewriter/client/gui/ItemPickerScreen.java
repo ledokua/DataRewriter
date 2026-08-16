@@ -15,7 +15,9 @@ import net.minecraft.world.level.material.Fluid;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -33,10 +35,16 @@ public class ItemPickerScreen extends Screen {
     private final boolean allowTags;
     private final Consumer<String> onPick;
 
+    // Remembered per item/fluid mode so closing and reopening the picker
+    // lands on the same search and scroll position (recipe editor pattern).
+    private static final Map<Boolean, String> LAST_QUERY = new HashMap<>();
+    private static final Map<Boolean, Integer> LAST_SCROLL = new HashMap<>();
+
     private EditBox searchBox;
-    private String query = "";
+    private String query;
     private List<Entry> entries = List.of();
     private int scrollRow;
+    private boolean restoreScroll = true;
 
     private record Entry(String ref, Component name) {
     }
@@ -53,6 +61,7 @@ public class ItemPickerScreen extends Screen {
         this.fluids = fluids;
         this.allowTags = allowTags;
         this.onPick = onPick;
+        this.query = LAST_QUERY.getOrDefault(fluids, "");
     }
 
     private int gridLeft() {
@@ -126,7 +135,17 @@ public class ItemPickerScreen extends Screen {
                     });
         }
         entries = found;
-        scrollRow = 0;
+        int totalRows = (entries.size() + COLS - 1) / COLS;
+        scrollRow = restoreScroll
+                ? Math.max(0, Math.min(LAST_SCROLL.getOrDefault(fluids, 0), totalRows - ROWS)) : 0;
+        restoreScroll = false;
+    }
+
+    @Override
+    public void removed() {
+        LAST_QUERY.put(fluids, query);
+        LAST_SCROLL.put(fluids, scrollRow);
+        super.removed();
     }
 
     private void pick(String ref) {
