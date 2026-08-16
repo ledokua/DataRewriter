@@ -65,6 +65,7 @@ final class BundledLayouts {
         if (typeExists("potions_ld:potion_brewing")) {
             layouts.add(potionsLdBrewing());
         }
+        layouts.addAll(CreateLayouts.forInstalledTypes());
         return layouts;
     }
 

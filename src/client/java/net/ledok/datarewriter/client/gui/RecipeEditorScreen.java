@@ -41,6 +41,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static net.ledok.datarewriter.client.gui.EditorLayout.FieldDef;
+import static net.ledok.datarewriter.client.gui.EditorLayout.FieldType;
 import static net.ledok.datarewriter.client.gui.EditorLayout.Kind;
 import static net.ledok.datarewriter.client.gui.EditorLayout.SlotDef;
 import static net.ledok.datarewriter.client.gui.EditorLayout.SlotFormat;
@@ -91,6 +92,36 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     /** True when the layout's texture actually resolves — else the card panel is drawn. */
     private boolean texturePresent;
 
+    private final EditorLayout.SlotView slotView = new EditorLayout.SlotView() {
+        @Override
+        public String ref(int index) {
+            String[] refs = refs();
+            return index >= 0 && index < refs.length ? refs[index] : null;
+        }
+
+        @Override
+        public int count(int index) {
+            int[] counts = counts();
+            return index >= 0 && index < counts.length ? counts[index] : 0;
+        }
+
+        @Override
+        public int chance(int index) {
+            int[] chances = chances();
+            return index >= 0 && index < chances.length ? chances[index] : 100;
+        }
+
+        @Override
+        public String field(String path) {
+            for (FieldDef field : layout.fields) {
+                if (field.path().equals(path)) {
+                    return fieldValue(field);
+                }
+            }
+            return "";
+        }
+    };
+
     private record FieldLabel(Component text, int x, int y) {
     }
 
@@ -118,6 +149,46 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
         this.layout = remembered != null ? remembered : layouts.getFirst();
         lastTypeId = this.layout.typeId;
+    }
+
+    /** Switches to the layout for {@code typeId} (before the screen is shown); false when unknown. */
+    public boolean selectType(String typeId) {
+        for (EditorLayout candidate : layouts) {
+            if (candidate.typeId.equals(typeId)) {
+                layout = candidate;
+                lastTypeId = typeId;
+                status = Component.empty();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Fills every slot and field with sample values (dev screenshot harness). */
+    public void fillSample() {
+        String[] refs = refs();
+        int[] counts = counts();
+        int[] chances = chances();
+        for (int i = 0; i < layout.slots.size(); i++) {
+            SlotDef slot = layout.slots.get(i);
+            if (slot.format().fluid()) {
+                refs[i] = slot.result() ? "minecraft:lava" : "minecraft:water";
+                counts[i] = 250;
+            } else {
+                refs[i] = slot.result() ? "minecraft:gold_ingot" : "minecraft:iron_ingot";
+                counts[i] = slot.format().counted ? 2 : 1;
+            }
+            if (slot.chanceable() && i % 2 == 1) {
+                chances[i] = 50;
+            }
+        }
+        for (FieldDef field : layout.fields) {
+            String value = field.suggestions().isEmpty() ? field.defaultValue() : field.suggestions().getLast();
+            if (field.type() == FieldType.INT && value.isEmpty()) {
+                value = "100";
+            }
+            fieldValues().put(field.path(), value);
+        }
     }
 
     private String[] refs() {
@@ -399,6 +470,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         } else {
             renderGenericPanel(graphics);
         }
+        if (layout.decoration != null) {
+            layout.decoration.render(graphics, panelLeft - layout.u, panelTop - layout.v, partialTick, slotView);
+        }
 
         String[] refs = refs();
         int[] counts = counts();
@@ -544,6 +618,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         graphics.fill(panelLeft, bottom - 1, right, bottom, 0xFF555555);
         graphics.fill(right - 1, panelTop, right, bottom, 0xFF555555);
 
+        if (layout.ownSlotArt) {
+            return;
+        }
         int arrowX = Integer.MAX_VALUE;
         int minResultY = Integer.MAX_VALUE;
         int maxResultY = Integer.MIN_VALUE;
@@ -954,13 +1031,14 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private void buildShaped(JsonObject recipe, String[] refs) {
-        int minRow = 3;
+        int n = layout.gridSize;
+        int minRow = n;
         int maxRow = -1;
-        int minCol = 3;
+        int minCol = n;
         int maxCol = -1;
-        for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 3; col++) {
-                if (refs[row * 3 + col] != null) {
+        for (int row = 0; row < n; row++) {
+            for (int col = 0; col < n; col++) {
+                if (refs[row * n + col] != null) {
                     minRow = Math.min(minRow, row);
                     maxRow = Math.max(maxRow, row);
                     minCol = Math.min(minCol, col);
@@ -976,7 +1054,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         for (int row = minRow; row <= maxRow; row++) {
             StringBuilder line = new StringBuilder();
             for (int col = minCol; col <= maxCol; col++) {
-                String ref = refs[row * 3 + col];
+                String ref = refs[row * n + col];
                 if (ref == null) {
                     line.append(' ');
                 } else {
@@ -993,7 +1071,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
 
     private void buildShapeless(JsonObject recipe, String[] refs) {
         JsonArray ingredients = new JsonArray();
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < layout.gridSize * layout.gridSize; i++) {
             if (refs[i] != null) {
                 ingredients.add(refs[i]);
             }
@@ -1090,9 +1168,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             // the grid from the parsed recipe instead.
             ResourceLocation serializer = BuiltInRegistries.RECIPE_SERIALIZER
                     .getKey(holder.value().getSerializer());
-            if (holder.value() instanceof ShapedRecipe shaped && serializer != null
-                    && serializer.toString().equals("minecraft:crafting_shaped")) {
-                return loadShapedParsed(holder, shaped);
+            if (holder.value() instanceof ShapedRecipe shaped && serializer != null) {
+                return loadShapedParsed(holder, shaped, serializer.toString());
             }
             return false;
         }
@@ -1133,8 +1210,16 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             if (!array && consumed.contains(slot.path())) {
                 continue; // an either/or path already claimed by another slot
             }
-            JsonElement value = getAtPath(json, slot.path(), cursors);
-            Parsed parsed = value == null ? null : parseAny(value);
+            Parsed parsed;
+            if (array) {
+                // Arrays may mix items and fluids (Create's ingredients/results):
+                // each slot takes the next entry of its own kind, so an item slot
+                // never swallows a fluid entry meant for a fluid slot.
+                parsed = nextArrayEntry(json, slot.path(), slot.format().fluid(), cursors);
+            } else {
+                JsonElement value = getAtPath(json, slot.path(), cursors);
+                parsed = value == null ? null : parseAny(value);
+            }
             if (parsed == null || parsed.fluidLike() != slot.format().fluid()) {
                 continue;
             }
@@ -1166,11 +1251,13 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     /** Fills the crafting grid from an already-parsed shaped recipe (no JSON round-trip). */
-    private boolean loadShapedParsed(RecipeHolder<?> holder, ShapedRecipe shaped) {
+    private boolean loadShapedParsed(RecipeHolder<?> holder, ShapedRecipe shaped, String typeId) {
         assert minecraft != null && minecraft.level != null;
+        // Vanilla shaped recipes and shaped-derived modded ones (e.g. Create's
+        // mechanical crafting) share the serializer id with their layout's type.
         EditorLayout target = null;
         for (EditorLayout candidate : layouts) {
-            if (candidate.typeId.equals("minecraft:crafting_shaped")) {
+            if (candidate.typeId.equals(typeId) && candidate.kind == Kind.SHAPED) {
                 target = candidate;
                 break;
             }
@@ -1187,13 +1274,14 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         int width = shaped.getWidth();
         int height = shaped.getHeight();
         List<Ingredient> ingredients = shaped.getIngredients();
-        for (int row = 0; row < Math.min(3, height); row++) {
-            for (int col = 0; col < Math.min(3, width); col++) {
+        int n = layout.gridSize;
+        for (int row = 0; row < Math.min(n, height); row++) {
+            for (int col = 0; col < Math.min(n, width); col++) {
                 // Tag ingredients arrive from the server pre-expanded, so the
                 // first matching item stands in for the tag.
                 ItemStack[] options = ingredients.get(row * width + col).getItems();
                 if (options.length > 0) {
-                    refs[row * 3 + col] = BuiltInRegistries.ITEM.getKey(options[0].getItem()).toString();
+                    refs[row * n + col] = BuiltInRegistries.ITEM.getKey(options[0].getItem()).toString();
                 }
             }
         }
@@ -1224,10 +1312,11 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 byLetter.put(letter.charAt(0), parsed.ref());
             }
         }
-        for (int row = 0; row < Math.min(3, pattern.size()); row++) {
+        int n = layout.gridSize;
+        for (int row = 0; row < Math.min(n, pattern.size()); row++) {
             String line = pattern.get(row).getAsString();
-            for (int col = 0; col < Math.min(3, line.length()); col++) {
-                refs[row * 3 + col] = byLetter.get(line.charAt(col));
+            for (int col = 0; col < Math.min(n, line.length()); col++) {
+                refs[row * n + col] = byLetter.get(line.charAt(col));
             }
         }
     }
@@ -1236,7 +1325,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         if (!(json.get("ingredients") instanceof JsonArray ingredients)) {
             return;
         }
-        for (int i = 0; i < Math.min(9, ingredients.size()); i++) {
+        for (int i = 0; i < Math.min(layout.gridSize * layout.gridSize, ingredients.size()); i++) {
             Parsed parsed = parseAny(ingredients.get(i));
             if (parsed != null) {
                 refs[i] = parsed.ref();
@@ -1268,6 +1357,40 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private record Parsed(String ref, int count, float chance, boolean fluidLike) {
+    }
+
+    /**
+     * Next entry of the array at {@code path} whose kind (fluid or item)
+     * matches, skipping the other kind; the cursor is kept per path and kind.
+     */
+    private static Parsed nextArrayEntry(JsonObject root, String path, boolean fluid, Map<String, Integer> cursors) {
+        String[] parts = path.split("\\.");
+        JsonObject current = root;
+        for (int i = 0; i < parts.length - 1; i++) {
+            if (current.get(parts[i]) instanceof JsonObject next) {
+                current = next;
+            } else {
+                return null;
+            }
+        }
+        String last = parts[parts.length - 1];
+        String name = last.substring(0, last.length() - 2);
+        if (!(current.get(name) instanceof JsonArray array)) {
+            return null;
+        }
+        String cursorKey = path + (fluid ? "|fluid" : "|item");
+        int wanted = cursors.merge(cursorKey, 1, Integer::sum) - 1;
+        int seen = 0;
+        for (JsonElement element : array) {
+            Parsed parsed = parseAny(element);
+            if (parsed == null || parsed.fluidLike() != fluid) {
+                continue;
+            }
+            if (seen++ == wanted) {
+                return parsed;
+            }
+        }
+        return null;
     }
 
     /** Best-effort extraction of (ref, amount, chance) from the shapes recipes use. */

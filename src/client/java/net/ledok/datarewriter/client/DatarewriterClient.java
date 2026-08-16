@@ -18,6 +18,7 @@ public class DatarewriterClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        ScreenshotHarness.init();
         // A command can't open a screen directly — the chat screen closes after
         // the command runs and would override it, so opening is deferred a tick.
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {

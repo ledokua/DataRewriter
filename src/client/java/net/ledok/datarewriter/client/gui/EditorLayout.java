@@ -59,6 +59,31 @@ public final class EditorLayout {
         JsonElement build(String ref, int count, float chance);
     }
 
+    /** Read access to the editor's current values, for decorations that react to them. */
+    public interface SlotView {
+        /** Ref in slot {@code index} ("mod:item" / "#mod:tag"), or null when empty. */
+        String ref(int index);
+
+        /** Amount in slot {@code index} (item count or mB). */
+        int count(int index);
+
+        /** Chance in percent (1-100) for chanceable slots. */
+        int chance(int index);
+
+        /** Current text of the field at {@code path} ("" when unset). */
+        String field(String path);
+    }
+
+    /**
+     * Extra art drawn over the panel background and under the slot contents
+     * (bundled layouts only): slot frames, arrows, animated machines. Coordinates
+     * are the same texture-space ones slots use — {@code left}/{@code top} is
+     * where the layout's (0,0) lands on screen.
+     */
+    public interface Decoration {
+        void render(net.minecraft.client.gui.GuiGraphics graphics, int left, int top, float partialTick, SlotView view);
+    }
+
     /**
      * x/y are the slot's item position in the original GUI's coordinates
      * (copy them straight from the mod's Menu class); the crop offset is
@@ -120,6 +145,19 @@ public final class EditorLayout {
      * empty array that filled slots then append into). Null = none.
      */
     public JsonObject template;
+    /** Extra art (see {@link Decoration}); null = none. */
+    public Decoration decoration;
+    /**
+     * True when the decoration draws its own slot frames, so the editor
+     * skips its generic grey slot boxes and result arrow (texture-less
+     * layouts only).
+     */
+    public boolean ownSlotArt;
+    /**
+     * Side length of the crafting grid for SHAPED/SHAPELESS layouts: the
+     * first gridSize² slots are the grid, row-major. 3 for vanilla crafting.
+     */
+    public int gridSize = 3;
 
     public EditorLayout(String typeId, String displayName, ResourceLocation texture,
                         int u, int v, int width, int height, int inventoryY,
