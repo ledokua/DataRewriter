@@ -26,6 +26,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.ArrayList;
@@ -70,7 +73,9 @@ public final class ListCommand {
                         .then(Commands.literal("errors")
                                 .executes(ctx -> showErrors(ctx.getSource())))
                         .then(Commands.literal("status")
-                                .executes(ctx -> showStatus(ctx.getSource())))));
+                                .executes(ctx -> showStatus(ctx.getSource())))
+                        .then(Commands.literal("hand")
+                                .executes(ctx -> showHand(ctx.getSource())))));
     }
 
     /**
@@ -139,6 +144,35 @@ public final class ListCommand {
             source.sendSuccess(() -> Component.literal(line).withStyle(color), false);
         }
         return lines.size();
+    }
+
+    /**
+     * /datarewriter hand — the id of the held item (main hand, else off hand),
+     * as a bare "namespace:path" line in chat that copies itself when clicked,
+     * and in the server log.
+     */
+    private static int showHand(CommandSourceStack source) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("Only players hold items."));
+            return 0;
+        }
+        ItemStack stack = player.getMainHandItem();
+        if (stack.isEmpty()) {
+            stack = player.getOffhandItem();
+        }
+        if (stack.isEmpty()) {
+            source.sendFailure(Component.literal("You're not holding anything."));
+            return 0;
+        }
+        String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        Datarewriter.LOGGER.info("hand ({}): {}", player.getGameProfile().getName(), id);
+        source.sendSuccess(() -> Component.literal(id).withStyle(style -> style
+                .withColor(ChatFormatting.AQUA)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, id))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("Click to copy")))), false);
+        return 1;
     }
 
     private static int poolCount(JsonElement table) {

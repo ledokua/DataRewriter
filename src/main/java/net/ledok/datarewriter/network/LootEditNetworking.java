@@ -25,6 +25,9 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.loot.entries.LootPoolEntries;
+import net.minecraft.resources.RegistryOps;
+import com.mojang.serialization.JsonOps;
 import net.minecraft.world.level.storage.loot.LootTable;
 
 import java.util.ArrayList;
@@ -180,10 +183,6 @@ public final class LootEditNetworking {
     }
 
     /**
-     * Pools other mods injected at runtime: the live table's pools beyond the
-     * datapack-level ones (loot events append pools). "" when there are none.
-     */
-    /**
      * What other mods added to a table at runtime, as a JSON object:
      * {@code pools} = whole pools appended after the datapack-level ones,
      * {@code entries} = per pool index, entries present in the live pool but
@@ -216,12 +215,12 @@ public final class LootEditNetworking {
             Map<String, Integer> known = new HashMap<>();
             if (cachedPool.get("entries") instanceof JsonArray cachedEntries) {
                 for (JsonElement e : cachedEntries) {
-                    known.merge(e.toString(), 1, Integer::sum);
+                    known.merge(canonicalEntry(server, e), 1, Integer::sum);
                 }
             }
             JsonArray extra = new JsonArray();
             for (JsonElement e : liveEntries) {
-                String key = e.toString();
+                String key = canonicalEntry(server, e);
                 int left = known.getOrDefault(key, 0);
                 if (left > 0) {
                     known.put(key, left - 1);
@@ -240,6 +239,27 @@ public final class LootEditNetworking {
         result.add("pools", tail);
         result.add("entries", extraEntries);
         return result.toString();
+    }
+
+    /**
+     * Entry JSON in the codec's own encoding (key order, defaults, number
+     * formats), so hand-written datapack JSON and re-encoded live entries
+     * compare equal when they mean the same thing. Falls back to the raw text.
+     */
+    private static String canonicalEntry(MinecraftServer server, JsonElement entry) {
+        try {
+            RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
+            var parsed = LootPoolEntries.CODEC.parse(ops, entry).result();
+            if (parsed.isPresent()) {
+                var encoded = LootPoolEntries.CODEC.encodeStart(ops, parsed.get()).result();
+                if (encoded.isPresent()) {
+                    return encoded.get().toString();
+                }
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return entry.toString();
     }
 
     /**

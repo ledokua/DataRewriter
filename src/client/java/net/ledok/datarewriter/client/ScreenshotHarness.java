@@ -2,6 +2,7 @@ package net.ledok.datarewriter.client;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.ledok.datarewriter.Datarewriter;
+import net.ledok.datarewriter.client.gui.LootTableEditorScreen;
 import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -30,6 +31,7 @@ final class ScreenshotHarness {
             return;
         }
         Queue<String> pending = new ArrayDeque<>(List.of(property.split(",")));
+        // Entries prefixed "loot:" open the loot table editor on that table instead.
         boolean sample = Boolean.getBoolean("datarewriter.screenshotSample");
         int[] timer = {0};
         String[] current = {null};
@@ -44,6 +46,10 @@ final class ScreenshotHarness {
                 }
                 current[0] = pending.poll().trim();
                 timer[0] = 0;
+                if (current[0].startsWith("loot:")) {
+                    client.setScreen(new LootTableEditorScreen(null, current[0].substring(5)));
+                    return;
+                }
                 RecipeEditorScreen screen = new RecipeEditorScreen();
                 if (!screen.selectType(current[0])) {
                     Datarewriter.LOGGER.warn("[screenshots] no layout for {}", current[0]);
@@ -59,7 +65,7 @@ final class ScreenshotHarness {
             }
             timer[0]++;
             if (timer[0] == 40) {
-                Screenshot.grab(client.gameDirectory, current[0].replace(':', '_') + ".png",
+                Screenshot.grab(client.gameDirectory, current[0].replace(':', '_').replace('/', '_') + ".png",
                         client.getMainRenderTarget(), message -> Datarewriter.LOGGER.info("[screenshots] {}", message.getString()));
             } else if (timer[0] == 45) {
                 client.setScreen(null);
