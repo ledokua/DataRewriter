@@ -30,25 +30,21 @@ public final class RecipeSaveNetworking {
         ServerPlayNetworking.registerGlobalReceiver(SaveRecipePayload.TYPE, (payload, context) -> {
             var player = context.player();
             if (!player.hasPermissions(2)) {
-                player.sendSystemMessage(prefix().append(Component.literal(
-                        "You need to be an operator to save recipes.").withStyle(ChatFormatting.RED)));
+                fail(player, "you need to be an operator (permission level 2) on this server");
                 return;
             }
             MinecraftServer server = context.server();
             GuiRecipeSaver.SaveResult result = GuiRecipeSaver.save(server, payload.recipeJson());
             if (result.error() != null) {
-                player.sendSystemMessage(prefix().append(Component.literal(
-                        "Recipe not saved — " + result.error()).withStyle(ChatFormatting.RED)));
+                fail(player, result.error());
                 return;
             }
             // Applied directly to the running RecipeManager — no data reload.
             // The config entry written above keeps it across restarts/reloads.
             RecipeRewriter.applyLive(server, result.recipe());
             Datarewriter.LOGGER.info("Recipe editor: saved and applied {}", result.recipe().id());
-            player.sendSystemMessage(prefix().append(Component.literal(
-                    "Recipe " + result.recipe().id() + " saved to config/datarewriter/"
-                            + GuiRecipeSaver.FILE_NAME + " and applied.")
-                    .withStyle(ChatFormatting.GRAY)));
+            succeed(player, "Recipe " + result.recipe().id() + " saved to config/datarewriter/"
+                    + GuiRecipeSaver.FILE_NAME + " on the server and applied live.");
         });
     }
 
@@ -56,8 +52,7 @@ public final class RecipeSaveNetworking {
         ServerPlayNetworking.registerGlobalReceiver(BulkRecipeEditPayload.TYPE, (payload, context) -> {
             var player = context.player();
             if (!player.hasPermissions(2)) {
-                player.sendSystemMessage(prefix().append(Component.literal(
-                        "You need to be an operator to edit recipes.").withStyle(ChatFormatting.RED)));
+                fail(player, "you need to be an operator (permission level 2) on this server");
                 return;
             }
             MinecraftServer server = context.server();
@@ -105,15 +100,25 @@ public final class RecipeSaveNetworking {
             }
             Datarewriter.LOGGER.info("Recipe tweaks: {} ({} -> {}): {}",
                     payload.mode(), payload.from(), payload.to(), result);
-            player.sendSystemMessage(prefix().append(Component.literal(result
-                    + ". Saved as a rule in config/datarewriter/" + GuiRecipeSaver.FILE_NAME
-                    + " — delete it there to undo.").withStyle(ChatFormatting.GRAY)));
+            succeed(player, result + ". Saved as a rule in config/datarewriter/" + GuiRecipeSaver.FILE_NAME
+                    + " on the server — delete it there to undo.");
         });
     }
 
     private static void fail(net.minecraft.server.level.ServerPlayer player, String message) {
-        player.sendSystemMessage(prefix().append(Component.literal(
-                "Recipe edit failed — " + message).withStyle(ChatFormatting.RED)));
+        String text = "Recipe not saved — " + message;
+        Datarewriter.LOGGER.warn("Recipe editor ({}): {}", player.getGameProfile().getName(), text);
+        player.sendSystemMessage(prefix().append(Component.literal(text).withStyle(ChatFormatting.RED)));
+        if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
+            ServerPlayNetworking.send(player, new LootPayloads.SaveResult(false, text));
+        }
+    }
+
+    private static void succeed(net.minecraft.server.level.ServerPlayer player, String message) {
+        player.sendSystemMessage(prefix().append(Component.literal(message).withStyle(ChatFormatting.GRAY)));
+        if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
+            ServerPlayNetworking.send(player, new LootPayloads.SaveResult(true, message));
+        }
     }
 
     private static MutableComponent prefix() {

@@ -41,6 +41,12 @@ public class RecipeTweaksScreen extends AbstractContainerScreen<LootEditorMenu> 
     private final List<Button> modeButtons = new java.util.ArrayList<>();
     private Component status = Component.empty();
 
+    /** Server's answer to the last apply (also in chat). */
+    public void onSaveResult(boolean ok, String message) {
+        status = Component.literal((ok ? "✔ " : "✘ ") + message)
+                .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.RED);
+    }
+
     private int panelLeft;
     private int panelTop;
     private int slotRowY;
@@ -220,7 +226,10 @@ public class RecipeTweaksScreen extends AbstractContainerScreen<LootEditorMenu> 
         }
 
         if (!status.getString().isEmpty()) {
-            graphics.drawCenteredString(font, status, width / 2, uiBottom - 14, 0xFFFFFF);
+            List<net.minecraft.util.FormattedCharSequence> lines = font.split(status, Math.max(200, width - 40));
+            for (int i = 0; i < Math.min(2, lines.size()); i++) {
+                graphics.drawCenteredString(font, lines.get(i), width / 2, uiBottom - 14 + i * 10, 0xFFFFFF);
+            }
         }
         if (hoveredSlot >= 0) {
             graphics.renderComponentTooltip(font, List.of(

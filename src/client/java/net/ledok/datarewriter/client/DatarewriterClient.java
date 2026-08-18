@@ -63,6 +63,17 @@ public class DatarewriterClient implements ClientModInitializer {
                 picker.onList(payload.itemFilter(), payload.ids());
             }
         });
+        ClientPlayNetworking.registerGlobalReceiver(LootPayloads.SaveResult.TYPE, (payload, context) -> {
+            if (context.client().screen instanceof LootTableEditorScreen editor) {
+                editor.onSaveResult(payload.ok(), payload.message());
+            } else if (context.client().screen instanceof LootTablePickerScreen picker) {
+                picker.onSaveResult(payload.ok(), payload.message());
+            } else if (context.client().screen instanceof RecipeEditorScreen editor) {
+                editor.onSaveResult(payload.ok(), payload.message());
+            } else if (context.client().screen instanceof RecipeTweaksScreen tweaks) {
+                tweaks.onSaveResult(payload.ok(), payload.message());
+            }
+        });
         ClientPlayNetworking.registerGlobalReceiver(LootPayloads.TableContent.TYPE, (payload, context) -> {
             if (context.client().screen instanceof LootTableEditorScreen editor
                     && editor.tableId.equals(payload.tableId())) {

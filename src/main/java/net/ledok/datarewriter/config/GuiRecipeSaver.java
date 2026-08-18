@@ -181,6 +181,7 @@ public final class GuiRecipeSaver {
         try {
             Files.createDirectories(dir);
             Files.writeString(dir.resolve(FILE_NAME), BANNER + GSON.toJson(root) + "\n");
+            Datarewriter.LOGGER.info("Recipe editor: wrote {}", dir.resolve(FILE_NAME).toAbsolutePath());
         } catch (IOException e) {
             throw new IOException("could not write " + FILE_NAME + ": " + e.getMessage());
         }

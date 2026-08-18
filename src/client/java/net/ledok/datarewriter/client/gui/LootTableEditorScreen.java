@@ -553,6 +553,22 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
 
     // --- saving ---------------------------------------------------------
 
+    /** Server's answer to the last save (also in chat); clears draft flags only on success. */
+    public void onSaveResult(boolean ok, String message) {
+        if (ok) {
+            if (pendingSuccess != null) {
+                pendingSuccess.run();
+            }
+            status = Component.literal("✔ " + message).withStyle(ChatFormatting.GREEN);
+        } else {
+            status = Component.literal("✘ " + message).withStyle(ChatFormatting.RED);
+        }
+        pendingSuccess = null;
+        rebuildWidgets();
+    }
+
+    private Runnable pendingSuccess;
+
     private void saveReplace() {
         if (!hasOwnPools()) {
             // No pools left: for an existing table this saves an "empty this
@@ -563,22 +579,24 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 return;
             }
             if (sendChunked("remove", "")) {
-                tableSource = new JsonObject();
-                dirtyExisting = false;
-                status = Component.literal("Empty-table rule sent — the server's answer is in chat.")
-                        .withStyle(ChatFormatting.GREEN);
-                rebuildWidgets();
+                pendingSuccess = () -> {
+                    tableSource = new JsonObject();
+                    dirtyExisting = false;
+                };
+                status = Component.literal("Empty-table rule sent — waiting for the server…")
+                        .withStyle(ChatFormatting.YELLOW);
             }
             return;
         }
         if (sendChunked("replace", buildTableJson().toString())) {
-            for (PoolState pool : pools) {
-                pool.isNew = false;
-            }
-            dirtyExisting = false;
-            status = Component.literal("Table sent — the server's answer is in chat.")
-                    .withStyle(ChatFormatting.GREEN);
-            rebuildWidgets();
+            pendingSuccess = () -> {
+                for (PoolState pool : pools) {
+                    pool.isNew = false;
+                }
+                dirtyExisting = false;
+            };
+            status = Component.literal("Table sent — waiting for the server…")
+                    .withStyle(ChatFormatting.YELLOW);
         }
     }
 
@@ -597,12 +615,13 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         if (sendChunked("modify", newPools.toString())) {
             String warning = dirtyExisting
                     ? " Edits to the table's own pools were NOT included — use Save table for those." : "";
-            for (PoolState pool : pools) {
-                pool.isNew = false;
-            }
-            status = Component.literal("Added pools sent — the server's answer is in chat." + warning)
-                    .withStyle(dirtyExisting ? ChatFormatting.YELLOW : ChatFormatting.GREEN);
-            rebuildWidgets();
+            pendingSuccess = () -> {
+                for (PoolState pool : pools) {
+                    pool.isNew = false;
+                }
+            };
+            status = Component.literal("Added pools sent — waiting for the server…" + warning)
+                    .withStyle(ChatFormatting.YELLOW);
         }
     }
 
@@ -961,7 +980,14 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         renderInventory(graphics, mouseX, mouseY);
 
         if (!status.getString().isEmpty()) {
-            graphics.drawCenteredString(font, status, width / 2, statusY, 0xFFFFFF);
+            // Long server answers wrap onto a second line instead of running off-screen.
+            List<net.minecraft.util.FormattedCharSequence> lines = font.split(status, Math.max(200, width - 40));
+            for (int i = 0; i < Math.min(2, lines.size()); i++) {
+                graphics.drawCenteredString(font, lines.get(i), width / 2, statusY + i * 10, 0xFFFFFF);
+            }
+            if (lines.size() > 2) {
+                // keep the rest reachable in chat; the screen only has room for two lines
+            }
         }
         if (tooltip != null) {
             graphics.renderComponentTooltip(font, tooltip, mouseX, mouseY);

@@ -133,4 +133,22 @@ public final class LootPayloads {
             return TYPE;
         }
     }
+
+    /**
+     * S2C: outcome of a SaveTable / BulkItemEdit — shown inside the editor
+     * screens (the same text also goes to chat), so a failed save is never
+     * missed and a successful one names the config file it went to.
+     */
+    public record SaveResult(boolean ok, String message) implements CustomPacketPayload {
+        public static final Type<SaveResult> TYPE = new Type<>(id("loot_save_result"));
+        public static final StreamCodec<ByteBuf, SaveResult> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.BOOL, SaveResult::ok,
+                ByteBufCodecs.STRING_UTF8, SaveResult::message,
+                SaveResult::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
 }

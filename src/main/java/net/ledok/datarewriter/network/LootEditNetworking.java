@@ -74,6 +74,8 @@ public final class LootEditNetworking {
                 LootPayloads.TableList.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.TableContent.TYPE,
                 LootPayloads.TableContent.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(LootPayloads.SaveResult.TYPE,
+                LootPayloads.SaveResult.STREAM_CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(LootPayloads.TableListRequest.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
@@ -120,8 +122,13 @@ public final class LootEditNetworking {
         if (player.hasPermissions(2)) {
             return false;
         }
-        player.sendSystemMessage(prefix().append(Component.literal(
-                "You need to be an operator to edit loot tables.").withStyle(ChatFormatting.RED)));
+        String text = "You need to be an operator (permission level 2) on this server to edit loot tables"
+                + " — nothing was saved.";
+        Datarewriter.LOGGER.warn("Loot editor: refused {} — not an operator", player.getGameProfile().getName());
+        player.sendSystemMessage(prefix().append(Component.literal(text).withStyle(ChatFormatting.RED)));
+        if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
+            ServerPlayNetworking.send(player, new LootPayloads.SaveResult(false, text));
+        }
         return true;
     }
 
@@ -326,11 +333,9 @@ public final class LootEditNetworking {
             fail(player, error);
             return;
         }
-        Datarewriter.LOGGER.info("Loot editor: {} — {}", id, applied);
-        player.sendSystemMessage(prefix().append(Component.literal(
-                "Loot table " + id + " " + applied + " — written to config/datarewriter/"
-                        + GuiLootSaver.FILE_NAME + " and applied.")
-                .withStyle(ChatFormatting.GRAY)));
+        Datarewriter.LOGGER.info("Loot editor: {} — {} (by {})", id, applied, player.getGameProfile().getName());
+        succeed(player, "Loot table " + id + " " + applied + " — written to config/datarewriter/"
+                + GuiLootSaver.FILE_NAME + " on the server and applied live.");
     }
 
     private static void handleBulk(MinecraftServer server, ServerPlayer player,
@@ -361,6 +366,17 @@ public final class LootEditNetworking {
         RewriteConfig.LootItemRemoval remove = removal
                 ? new RewriteConfig.LootItemRemoval(from, scope, GuiLootSaver.FILE_NAME) : null;
 
+        // Persist first: if the config file can't be written, nothing changes
+        // in memory either — otherwise the editor would show an edit that
+        // silently vanishes on the next reload or restart.
+        String error = removal
+                ? GuiLootSaver.saveRemoveItems(fromItem, scopeText)
+                : GuiLootSaver.saveReplaceItems(fromItem, toItem, scopeText);
+        if (error != null) {
+            fail(player, error);
+            return;
+        }
+
         int entriesChanged = 0;
         List<ResourceLocation> changedTables = new ArrayList<>();
         for (Map.Entry<ResourceLocation, JsonElement> entry : RewriteState.lootTableJsons.entrySet()) {
@@ -377,13 +393,6 @@ public final class LootEditNetworking {
             }
         }
 
-        String error = removal
-                ? GuiLootSaver.saveRemoveItems(fromItem, scopeText)
-                : GuiLootSaver.saveReplaceItems(fromItem, toItem, scopeText);
-        if (error != null) {
-            fail(player, error);
-            return;
-        }
         // Mirror the rule into the in-memory config so the rebinds below (and
         // later editor saves) apply it to runtime-injected loot immediately.
         if (removal) {
@@ -429,7 +438,7 @@ public final class LootEditNetworking {
                 + " in " + changedTables.size() + " loot table" + (changedTables.size() == 1 ? "" : "s")
                 + (removal ? "" : " with " + toItem)
                 + (scope == null ? "" : " (tables: " + scopeText + ")")
-                + " — rule saved to config/datarewriter/" + GuiLootSaver.FILE_NAME + ".";
+                + " — rule saved to config/datarewriter/" + GuiLootSaver.FILE_NAME + " on the server.";
         if (applyFailures > 0) {
             summary += " (" + applyFailures + " table(s) could not be applied live, see log —"
                     + " they will after /reload)";
@@ -437,8 +446,7 @@ public final class LootEditNetworking {
         Datarewriter.LOGGER.info("Loot editor: bulk {} '{}'{}: {} entries in {} tables",
                 removal ? "remove" : "replace", fromItem,
                 removal ? "" : " -> '" + toItem + "'", entriesChanged, changedTables.size());
-        player.sendSystemMessage(prefix().append(
-                Component.literal(summary).withStyle(ChatFormatting.GRAY)));
+        succeed(player, summary);
     }
 
     private static JsonObject parseObject(String json) {
@@ -450,8 +458,19 @@ public final class LootEditNetworking {
     }
 
     private static void fail(ServerPlayer player, String message) {
-        player.sendSystemMessage(prefix().append(Component.literal(
-                "Loot table not saved — " + message).withStyle(ChatFormatting.RED)));
+        String text = "Loot table not saved — " + message;
+        Datarewriter.LOGGER.warn("Loot editor ({}): {}", player.getGameProfile().getName(), text);
+        player.sendSystemMessage(prefix().append(Component.literal(text).withStyle(ChatFormatting.RED)));
+        if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
+            ServerPlayNetworking.send(player, new LootPayloads.SaveResult(false, text));
+        }
+    }
+
+    private static void succeed(ServerPlayer player, String message) {
+        player.sendSystemMessage(prefix().append(Component.literal(message).withStyle(ChatFormatting.GRAY)));
+        if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
+            ServerPlayNetworking.send(player, new LootPayloads.SaveResult(true, message));
+        }
     }
 
     private static MutableComponent prefix() {

@@ -512,7 +512,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             graphics.drawString(font, label.text(), label.x(), label.y(), 0xA0A0A0);
         }
         if (!status.getString().isEmpty()) {
-            graphics.drawCenteredString(font, status, width / 2, statusY, 0xFFFFFF);
+            List<net.minecraft.util.FormattedCharSequence> lines = font.split(status, Math.max(200, width - 40));
+            for (int i = 0; i < Math.min(2, lines.size()); i++) {
+                graphics.drawCenteredString(font, lines.get(i), width / 2, statusY + i * 10, 0xFFFFFF);
+            }
         }
 
         if (hoveredSlot >= 0) {
@@ -943,8 +946,14 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         ClientPlayNetworking.send(new SaveRecipePayload(recipe.toString()));
         // The editor stays open for the next recipe; the server's confirmation
         // (or rejection) arrives in chat.
-        status = Component.literal("Recipe sent — the server's answer is in chat.")
-                .withStyle(ChatFormatting.GREEN);
+        status = Component.literal("Recipe sent — waiting for the server…")
+                .withStyle(ChatFormatting.YELLOW);
+    }
+
+    /** Server's answer to the last save (also in chat). */
+    public void onSaveResult(boolean ok, String message) {
+        status = Component.literal((ok ? "✔ " : "✘ ") + message)
+                .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.RED);
     }
 
     private void clearSlots() {

@@ -156,6 +156,7 @@ public final class GuiLootSaver {
         } catch (IOException e) {
             return "could not write " + FILE_NAME + ": " + e.getMessage();
         }
+        Datarewriter.LOGGER.info("Loot editor: wrote {}", file.toAbsolutePath());
         return null;
     }
 

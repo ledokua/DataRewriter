@@ -273,7 +273,21 @@ public class LootTablePickerScreen extends Screen {
         }
         graphics.drawCenteredString(font, Component.literal(footer).withStyle(ChatFormatting.GRAY),
                 width / 2, top + rows * ROW_HEIGHT + 10, 0xA0A0A0);
+        if (!lastResult.getString().isEmpty()) {
+            List<net.minecraft.util.FormattedCharSequence> lines = font.split(lastResult, Math.max(200, width - 40));
+            for (int i = 0; i < Math.min(2, lines.size()); i++) {
+                graphics.drawCenteredString(font, lines.get(i), width / 2, top + rows * ROW_HEIGHT + 22 + i * 10, 0xFFFFFF);
+            }
+        }
     }
+
+    /** Server's answer to the last bulk Replace/Remove (also in chat). */
+    public void onSaveResult(boolean ok, String message) {
+        lastResult = Component.literal((ok ? "✔ " : "✘ ") + message)
+                .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.RED);
+    }
+
+    private Component lastResult = Component.empty();
 
     /** The search text as a new-table id, if it is a valid unknown id. */
     private String validNewId() {
