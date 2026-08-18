@@ -132,6 +132,11 @@ public final class LootRewriter {
             Datarewriter.LOGGER.info("Emptied {} loot tables, added {} ({} replacing existing ones), "
                             + "modified {}; item entries: {} replaced, {} removed",
                     removed, loaded.lootAdditions().size(), replaced, modified, itemsReplaced, itemsRemoved);
+            if (!loaded.lootAdditions().isEmpty()) {
+                Datarewriter.LOGGER.info("Loot tables added: {}", loaded.lootAdditions().stream()
+                        .map(a -> a.id() + " (" + a.source() + ")")
+                        .collect(java.util.stream.Collectors.joining(", ")));
+            }
         }
     }
 

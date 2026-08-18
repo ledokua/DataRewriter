@@ -28,6 +28,7 @@ public class Datarewriter implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             RecipeRewriter.applyParsedRules(server);
             LootInjectionRewriter.apply(server);
+            RewriteState.missingConfigTables(server);
         });
         ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> {
             if (success) {

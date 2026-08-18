@@ -76,6 +76,28 @@ public final class RewriteState {
         return config;
     }
 
+    /**
+     * Config 'add' loot tables that are missing from the live registry after a
+     * (re)load — the game rejected their JSON (typically an item from a mod
+     * that isn't installed here), so they now drop nothing. Logged as WARN.
+     */
+    public static List<String> missingConfigTables(MinecraftServer server) {
+        List<String> missing = new ArrayList<>();
+        var registry = server.reloadableRegistries().get()
+                .registryOrThrow(net.minecraft.core.registries.Registries.LOOT_TABLE);
+        for (RewriteConfig.AddedLootTable addition : config().lootAdditions()) {
+            if (!registry.containsKey(addition.id())) {
+                missing.add(addition.id().toString());
+            }
+        }
+        if (!missing.isEmpty()) {
+            Datarewriter.LOGGER.warn("{} loot table(s) from the config did not load — the game rejected the JSON "
+                    + "(look for 'Couldn't parse element' above; usually an item from a mod that isn't installed "
+                    + "on this server): {}", missing.size(), String.join(", ", missing));
+        }
+        return missing;
+    }
+
     /** GUI config files found overwritten by something else at the last reload (see announce). */
     private static volatile List<String> externallyChangedFiles = new ArrayList<>();
 
@@ -186,6 +208,12 @@ public final class RewriteState {
         if (loaded.errorCount() > 0) {
             message.append(Component.literal(" — " + loaded.errorCount() + " config error(s), see log")
                     .withStyle(ChatFormatting.RED));
+        }
+        List<String> missing = missingConfigTables(server);
+        if (!missing.isEmpty()) {
+            message.append(Component.literal(" — WARNING: " + missing.size() + " config loot table(s) were rejected "
+                    + "by the game and drop nothing now: " + String.join(", ", missing)
+                    + " (see 'Couldn't parse element' in the log)").withStyle(ChatFormatting.RED));
         }
         if (!externallyChangedFiles.isEmpty()) {
             message.append(Component.literal(" — WARNING: " + String.join(", ", externallyChangedFiles)

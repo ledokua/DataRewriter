@@ -5,7 +5,17 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.ledok.datarewriter.Datarewriter;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import net.ledok.datarewriter.LootLiveApplier;
+import net.ledok.datarewriter.RewriteState;
 import net.ledok.datarewriter.config.ConfigLoader;
+import net.ledok.datarewriter.config.RewriteConfig;
+import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.storage.loot.LootTable;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -18,7 +28,9 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
@@ -56,7 +68,81 @@ public final class ListCommand {
                                 .then(kindNode(Kind.RECIPES))
                                 .then(kindNode(Kind.LOOT_TABLES)))
                         .then(Commands.literal("errors")
-                                .executes(ctx -> showErrors(ctx.getSource())))));
+                                .executes(ctx -> showErrors(ctx.getSource())))
+                        .then(Commands.literal("status")
+                                .executes(ctx -> showStatus(ctx.getSource())))));
+    }
+
+    /**
+     * /datarewriter status — which config files the last load read (and from
+     * where), and whether each loot 'add'/'modify' entry is actually in effect
+     * right now: loaded into DataRewriter's table cache and present in the
+     * live registry. Meant for "my edit is gone after a restart" reports.
+     */
+    private static int showStatus(CommandSourceStack source) {
+        RewriteConfig config = RewriteState.config();
+        List<String> lines = new ArrayList<>();
+        lines.add("config dir: " + ConfigLoader.directory());
+        if (ConfigLoader.files().isEmpty()) {
+            lines.add("no config files loaded");
+        }
+        for (ConfigLoader.FileSummary file : ConfigLoader.files()) {
+            lines.add("file " + file);
+        }
+        MinecraftServer server = source.getServer();
+        Registry<LootTable> registry = server.reloadableRegistries().get().registryOrThrow(Registries.LOOT_TABLE);
+        for (RewriteConfig.AddedLootTable addition : config.lootAdditions()) {
+            int configPools = poolCount(addition.json());
+            JsonElement cached = RewriteState.lootTableJsons.get(addition.id());
+            Optional<Holder.Reference<LootTable>> live = registry.getHolder(
+                    ResourceKey.create(Registries.LOOT_TABLE, addition.id()));
+            JsonObject liveJson = live.map(h -> LootLiveApplier.encode(server, h.value())).orElse(null);
+            String state;
+            if (cached == null) {
+                state = "NOT LOADED into the table cache";
+            } else if (poolCount(cached) < configPools) {
+                state = "loaded but the cache has only " + poolCount(cached) + " pools";
+            } else if (live.isEmpty()) {
+                state = "loaded, but no live loot table with this id exists";
+            } else if (liveJson == null) {
+                state = "loaded; live table can't be encoded (mod entries)";
+            } else if (poolCount(liveJson) < configPools) {
+                state = "loaded, but the LIVE table has only " + poolCount(liveJson)
+                        + " pools — another mod replaced it after DataRewriter";
+            } else {
+                state = "in effect (live: " + poolCount(liveJson) + " pools"
+                        + (poolCount(liveJson) > configPools
+                        ? ", " + (poolCount(liveJson) - configPools) + " injected by other mods)" : ")");
+            }
+            lines.add("loot add " + addition.id() + " (from " + addition.source() + ") — config: "
+                    + configPools + " pools — " + state);
+        }
+        for (RewriteConfig.LootModification modification : config.lootModifications()) {
+            RewriteConfig.LootRule target = modification.target();
+            lines.add("loot modify " + (target.id() != null ? target.id().toString() : "mod " + target.mod())
+                    + " — " + modification.pools().size() + " pools appended (from " + target.source() + ")");
+        }
+        lines.add("recipes: " + config.removals().size() + " removal rules, " + config.additions().size()
+                + " added, " + config.ingredientReplacements().size() + " ingredient replacements; loot: "
+                + config.lootRemovals().size() + " removals, " + config.lootItemReplacements().size()
+                + " item replacements, " + config.lootItemRemovals().size() + " item removals; "
+                + config.errorCount() + " config errors");
+        Datarewriter.LOGGER.info("Status:");
+        for (String line : lines) {
+            Datarewriter.LOGGER.info("  {}", line);
+        }
+        source.sendSuccess(() -> Component.literal("[DataRewriter] ").withStyle(ChatFormatting.GOLD)
+                .append(Component.literal("status (also in the server log):").withStyle(ChatFormatting.GRAY)), false);
+        for (String line : lines) {
+            ChatFormatting color = line.contains("NOT LOADED") || line.contains("but ") ? ChatFormatting.RED
+                    : line.contains("in effect") ? ChatFormatting.GREEN : ChatFormatting.GRAY;
+            source.sendSuccess(() -> Component.literal(line).withStyle(color), false);
+        }
+        return lines.size();
+    }
+
+    private static int poolCount(JsonElement table) {
+        return table instanceof JsonObject obj && obj.get("pools") instanceof JsonArray pools ? pools.size() : 0;
     }
 
     /** How many issue lines go to chat before pointing at the log instead. */

@@ -43,7 +43,10 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
     }
 
     /** A new (or replacement) loot table in vanilla loot table JSON format. */
-    public record AddedLootTable(ResourceLocation id, JsonElement json) {
+    public record AddedLootTable(ResourceLocation id, JsonElement json, String source) {
+        public AddedLootTable(ResourceLocation id, JsonElement json) {
+            this(id, json, "?");
+        }
     }
 
     /**

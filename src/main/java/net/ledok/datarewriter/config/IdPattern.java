@@ -19,6 +19,11 @@ public final class IdPattern {
         this.regex = regex;
     }
 
+    @Override
+    public String toString() {
+        return literal != null ? literal : regex != null ? regex.pattern() : "?";
+    }
+
     /** Returns null if the value is not a valid id or pattern. */
     public static @Nullable IdPattern parse(String value) {
         if (value.contains("*")) {

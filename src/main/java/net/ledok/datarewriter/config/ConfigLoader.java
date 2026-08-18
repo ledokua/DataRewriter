@@ -73,11 +73,24 @@ public final class ConfigLoader {
                     })
                     .sorted()
                     .toList();
+            List<FileSummary> summaries = new ArrayList<>();
             for (Path file : files) {
-                loadFile(dir.relativize(file).toString().replace('\\', '/'), file,
+                int recipeBefore = removals.size() + additions.size() + ingredientReplacements.size();
+                int lootBefore = lootRemovals.size() + lootAdditions.size() + lootModifications.size()
+                        + lootItemReplacements.size() + lootItemRemovals.size();
+                String name = dir.relativize(file).toString().replace('\\', '/');
+                loadFile(name, file,
                         removals, additions, ingredientReplacements, lootRemovals,
                         lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals);
+                summaries.add(new FileSummary(name,
+                        removals.size() + additions.size() + ingredientReplacements.size() - recipeBefore,
+                        lootRemovals.size() + lootAdditions.size() + lootModifications.size()
+                                + lootItemReplacements.size() + lootItemRemovals.size() - lootBefore));
             }
+            lastFiles = List.copyOf(summaries);
+            lastDir = dir.toAbsolutePath().toString();
+            Datarewriter.LOGGER.info("Config: {} — {}", lastDir, summaries.isEmpty() ? "no files"
+                    : summaries.stream().map(FileSummary::toString).collect(java.util.stream.Collectors.joining(", ")));
         } catch (IOException e) {
             error("Could not read config directory {}", dir, e);
         }
@@ -88,6 +101,27 @@ public final class ConfigLoader {
                 List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                 List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                 errors);
+    }
+
+    /** One config file of the last load and how many rules it contributed. */
+    public record FileSummary(String name, int recipeRules, int lootRules) {
+        @Override
+        public String toString() {
+            return name + " (" + recipeRules + " recipe, " + lootRules + " loot rules)";
+        }
+    }
+
+    private static volatile List<FileSummary> lastFiles = List.of();
+    private static volatile String lastDir = "";
+
+    /** Files read by the last config load, in load order (later files win on the same id). */
+    public static List<FileSummary> files() {
+        return lastFiles;
+    }
+
+    /** Absolute config directory of the last load. */
+    public static String directory() {
+        return lastDir;
     }
 
     /** Errors and warnings of the last config load, for /datarewriter errors. */
@@ -365,7 +399,15 @@ public final class ConfigLoader {
                 continue;
             }
             obj.remove("id");
-            lootAdditions.add(new RewriteConfig.AddedLootTable(id, obj));
+            for (RewriteConfig.AddedLootTable earlier : lootAdditions) {
+                if (earlier.id().equals(id)) {
+                    warn("[{}] loot_tables add: {} is also added by {} — files load in name order and the "
+                            + "later one wins, so this entry replaces the one from {}. Keep only one "
+                            + "(in-game editor saves go to gui-loot-tables.json5).",
+                            fileName, id, earlier.source(), earlier.source());
+                }
+            }
+            lootAdditions.add(new RewriteConfig.AddedLootTable(id, obj, fileName));
         }
     }
 
@@ -513,6 +555,13 @@ public final class ConfigLoader {
                 continue;
             }
             RecipeJsonNormalizer.normalize(obj);
+            for (RewriteConfig.AddedRecipe earlier : additions) {
+                if (earlier.id().equals(id)) {
+                    warn("[{}] recipes add: {} is added twice (files load in name order, the later entry wins)",
+                            fileName, id);
+                    break;
+                }
+            }
             additions.add(new RewriteConfig.AddedRecipe(id, obj));
         }
     }
