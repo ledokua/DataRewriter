@@ -5,6 +5,8 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.ledok.datarewriter.Datarewriter;
+import net.ledok.datarewriter.network.LootPayloads;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -167,11 +169,18 @@ public final class ListCommand {
         }
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         Datarewriter.LOGGER.info("hand ({}): {}", player.getGameProfile().getName(), id);
+        // Clients running the mod get it straight into their clipboard;
+        // vanilla clients click the line to copy.
+        boolean pushed = ServerPlayNetworking.canSend(player, LootPayloads.Clipboard.TYPE);
+        if (pushed) {
+            ServerPlayNetworking.send(player, new LootPayloads.Clipboard(id));
+        }
         source.sendSuccess(() -> Component.literal(id).withStyle(style -> style
                 .withColor(ChatFormatting.AQUA)
                 .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, id))
                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        Component.literal("Click to copy")))), false);
+                        Component.literal(pushed ? "Copied to your clipboard (click to copy again)"
+                                : "Click to copy")))), false);
         return 1;
     }
 

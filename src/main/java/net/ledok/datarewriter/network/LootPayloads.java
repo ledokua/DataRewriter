@@ -151,4 +151,16 @@ public final class LootPayloads {
             return TYPE;
         }
     }
+
+    /** S2C: put text into the client's clipboard (only sent to clients that run the mod). */
+    public record Clipboard(String text) implements CustomPacketPayload {
+        public static final Type<Clipboard> TYPE = new Type<>(id("clipboard"));
+        public static final StreamCodec<ByteBuf, Clipboard> STREAM_CODEC =
+                ByteBufCodecs.STRING_UTF8.map(Clipboard::new, Clipboard::text);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
 }

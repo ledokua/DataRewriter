@@ -308,7 +308,7 @@ You don't have to dig through mod jars to find recipe or loot table ids — as a
 - `/datarewriter list loot_tables [mod] [page]` — the same for loot tables
 - `/datarewriter errors` — every error and warning from the last config load, in chat (and printed to the server log again); `/reload` re-checks
 - `/datarewriter status` — which config files were read from where and whether each loot table `add` is in effect right now (see Troubleshooting)
-- `/datarewriter hand` — the id of the item in your hand (main hand, else off hand) as a bare `mod:item` line: click it to copy; also written to the server log
+- `/datarewriter hand` — the id of the item in your hand (main hand, else off hand) as a bare `mod:item` line, also written to the server log. If your client runs DataRewriter it lands in your clipboard immediately; on a vanilla client, click the line to copy
 
 The commands are registered server-side, so they work from a vanilla client. Listings reflect the current state (after your rules), so recipes you added under the `datarewriter:` namespace show up too.
 

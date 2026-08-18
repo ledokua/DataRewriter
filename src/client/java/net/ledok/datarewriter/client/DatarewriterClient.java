@@ -63,6 +63,8 @@ public class DatarewriterClient implements ClientModInitializer {
                 picker.onList(payload.itemFilter(), payload.ids());
             }
         });
+        ClientPlayNetworking.registerGlobalReceiver(LootPayloads.Clipboard.TYPE, (payload, context) ->
+                context.client().keyboardHandler.setClipboard(payload.text()));
         ClientPlayNetworking.registerGlobalReceiver(LootPayloads.SaveResult.TYPE, (payload, context) -> {
             if (context.client().screen instanceof LootTableEditorScreen editor) {
                 editor.onSaveResult(payload.ok(), payload.message());

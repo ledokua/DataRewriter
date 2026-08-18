@@ -80,6 +80,8 @@ public final class LootEditNetworking {
                 LootPayloads.TableContent.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.SaveResult.TYPE,
                 LootPayloads.SaveResult.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(LootPayloads.Clipboard.TYPE,
+                LootPayloads.Clipboard.STREAM_CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(LootPayloads.TableListRequest.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
