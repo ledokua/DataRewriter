@@ -28,6 +28,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.loot.LootTable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -182,22 +183,63 @@ public final class LootEditNetworking {
      * Pools other mods injected at runtime: the live table's pools beyond the
      * datapack-level ones (loot events append pools). "" when there are none.
      */
+    /**
+     * What other mods added to a table at runtime, as a JSON object:
+     * {@code pools} = whole pools appended after the datapack-level ones,
+     * {@code entries} = per pool index, entries present in the live pool but
+     * not in the cached (datapack-level) pool — mods that merge into existing
+     * pools instead of appending (e.g. loot-weight tweakers). "" = nothing.
+     */
     private static String injectedPools(MinecraftServer server, ResourceLocation id,
                                         JsonElement cached) {
-        int base = cached instanceof JsonObject obj && obj.get("pools") instanceof JsonArray a
-                ? a.size() : 0;
+        JsonArray cachedPools = cached instanceof JsonObject obj && obj.get("pools") instanceof JsonArray a
+                ? a : new JsonArray();
+        int base = cachedPools.size();
         LootTable table = server.reloadableRegistries().get()
                 .registryOrThrow(Registries.LOOT_TABLE).get(id);
         JsonObject runtime = table == null ? null : runtimeTable(server, id, table);
-        if (runtime == null || !(runtime.get("pools") instanceof JsonArray pools)
-                || pools.size() <= base) {
+        if (runtime == null || !(runtime.get("pools") instanceof JsonArray pools)) {
             return "";
         }
         JsonArray tail = new JsonArray();
         for (int i = base; i < pools.size(); i++) {
             tail.add(pools.get(i));
         }
-        return tail.toString();
+        JsonObject extraEntries = new JsonObject();
+        for (int i = 0; i < Math.min(base, pools.size()); i++) {
+            if (!(pools.get(i) instanceof JsonObject livePool) || !(livePool.get("entries") instanceof JsonArray liveEntries)
+                    || !(cachedPools.get(i) instanceof JsonObject cachedPool)) {
+                continue;
+            }
+            // Multiset difference by JSON text: an entry the live pool has more
+            // often than the cached pool was merged in by someone else.
+            Map<String, Integer> known = new HashMap<>();
+            if (cachedPool.get("entries") instanceof JsonArray cachedEntries) {
+                for (JsonElement e : cachedEntries) {
+                    known.merge(e.toString(), 1, Integer::sum);
+                }
+            }
+            JsonArray extra = new JsonArray();
+            for (JsonElement e : liveEntries) {
+                String key = e.toString();
+                int left = known.getOrDefault(key, 0);
+                if (left > 0) {
+                    known.put(key, left - 1);
+                } else {
+                    extra.add(e);
+                }
+            }
+            if (!extra.isEmpty()) {
+                extraEntries.add(String.valueOf(i), extra);
+            }
+        }
+        if (tail.isEmpty() && extraEntries.isEmpty()) {
+            return "";
+        }
+        JsonObject result = new JsonObject();
+        result.add("pools", tail);
+        result.add("entries", extraEntries);
+        return result.toString();
     }
 
     /**

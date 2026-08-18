@@ -118,6 +118,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         ItemStack iconCache;            // icon with visual loot functions applied
         String iconCacheRef;
         boolean fancy;                  // functions change how the drop looks
+        /** Merged into this pool at runtime by another mod — shown read-only, never saved. */
+        boolean injected;
+        String injectedBy = "";
     }
 
     /** A fresh 'empty' entry — a weighted chance to drop nothing. */
@@ -248,14 +251,38 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             return;
         }
         try {
-            if (JsonParser.parseString(injected) instanceof JsonArray array) {
-                for (JsonElement element : array) {
-                    if (element instanceof JsonObject poolObj) {
-                        PoolState pool = parsePool(poolObj, false);
-                        pool.injected = true;
-                        pool.injectedBy = guessNamespace(poolObj);
-                        pools.add(pool);
+            JsonElement parsed = JsonParser.parseString(injected);
+            JsonArray tailPools = parsed instanceof JsonArray array ? array
+                    : parsed instanceof JsonObject obj && obj.get("pools") instanceof JsonArray a ? a : new JsonArray();
+            // Entries other mods merged into the table's own pools (by pool index).
+            if (parsed instanceof JsonObject obj && obj.get("entries") instanceof JsonObject perPool) {
+                for (String key : perPool.keySet()) {
+                    int poolIndex;
+                    try {
+                        poolIndex = Integer.parseInt(key);
+                    } catch (NumberFormatException e) {
+                        continue;
                     }
+                    if (poolIndex < 0 || poolIndex >= pools.size()
+                            || !(perPool.get(key) instanceof JsonArray extra)) {
+                        continue;
+                    }
+                    for (JsonElement element : extra) {
+                        if (element instanceof JsonObject entryObj) {
+                            EntryState entry = parseEntry(entryObj);
+                            entry.injected = true;
+                            entry.injectedBy = guessNamespace(entryObj);
+                            pools.get(poolIndex).entries.add(entry);
+                        }
+                    }
+                }
+            }
+            for (JsonElement element : tailPools) {
+                if (element instanceof JsonObject poolObj) {
+                    PoolState pool = parsePool(poolObj, false);
+                    pool.injected = true;
+                    pool.injectedBy = guessNamespace(poolObj);
+                    pools.add(pool);
                 }
             }
         } catch (Exception ignored) {
@@ -528,6 +555,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
         JsonArray entries = new JsonArray();
         for (EntryState entry : pool.entries) {
+            if (entry.injected) {
+                continue; // belongs to the other mod, re-merged by it on every load
+            }
             syncEntry(entry);
             entries.add(entry.source);
         }
@@ -1127,6 +1157,17 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             graphics.drawString(font, "#", 1, 23, 0xFFAA00, true);
             graphics.pose().popPose();
         }
+        if (entry.injected) {
+            // Purple tint + frame: merged in by another mod, like injected pools.
+            graphics.pose().pushPose();
+            graphics.pose().translate(0, 0, 250);
+            graphics.fill(x, y, x + 16, y + 16, 0x50A040C0);
+            graphics.fill(x - 1, y - 1, x + 17, y, 0xFF8040A0);
+            graphics.fill(x - 1, y + 16, x + 17, y + 17, 0xFF8040A0);
+            graphics.fill(x - 1, y, x, y + 16, 0xFF8040A0);
+            graphics.fill(x + 16, y, x + 17, y + 16, 0xFF8040A0);
+            graphics.pose().popPose();
+        }
     }
 
     private static Item complexIcon(EntryState entry) {
@@ -1161,6 +1202,14 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
 
     private List<Component> entryTooltip(PoolState pool, EntryState entry) {
         List<Component> lines = new ArrayList<>();
+        if (entry.injected && !pool.injected) {
+            lines.add(Component.literal("Merged into this pool at runtime by another mod"
+                    + (entry.injectedBy.isEmpty() ? "" : " — looks like '" + entry.injectedBy + "'"))
+                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+            lines.add(Component.literal("Not part of the table's own JSON, so it is read-only here and "
+                    + "never saved — change it in that mod's config. Bulk Replace/Remove item DOES cover it.")
+                    .withStyle(ChatFormatting.GRAY));
+        }
         if (pool.injected) {
             lines.add(Component.literal("Injected at runtime by another mod"
                     + (pool.injectedBy.isEmpty() ? "" : " — looks like '" + pool.injectedBy + "'"))
@@ -1380,6 +1429,14 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             return true;
         }
         boolean addSlot = hit[1] == pool.entries.size();
+        if (!addSlot && pool.entries.get(hit[1]).injected) {
+            EntryState injectedEntry = pool.entries.get(hit[1]);
+            status = Component.literal("This entry was merged into the pool at runtime by another mod"
+                    + (injectedEntry.injectedBy.isEmpty() ? "" : " (looks like '" + injectedEntry.injectedBy + "')")
+                    + " — read-only here (bulk Replace/Remove item does cover it).")
+                    .withStyle(ChatFormatting.LIGHT_PURPLE);
+            return true;
+        }
         if (button == 1 && addSlot) {
             // An 'empty' entry: one weighted option of the pool that drops
             // nothing when the roll picks it.
@@ -1461,7 +1518,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
 
     /** Entries an item/tag can be placed into; composites and refs are edited by clicking. */
     static boolean isItemPlaceable(EntryState entry) {
-        return entry.kind == Kind.ITEM || entry.kind == Kind.TAG || entry.kind == Kind.EMPTY;
+        return !entry.injected && (entry.kind == Kind.ITEM || entry.kind == Kind.TAG || entry.kind == Kind.EMPTY);
     }
 
     /** Sets an entry's item (or adds a new entry when index == size). */
@@ -1553,6 +1610,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 return true; // read-only: swallow the scroll, no edits
             }
             EntryState entry = pool.entries.get(hit[1]);
+            if (entry.injected) {
+                return true; // read-only: swallow the scroll, no edits
+            }
             boolean itemLike = entry.kind == Kind.ITEM || entry.kind == Kind.TAG;
             if (hasAltDown()) {
                 if (itemLike && !entry.chanceLocked) {
