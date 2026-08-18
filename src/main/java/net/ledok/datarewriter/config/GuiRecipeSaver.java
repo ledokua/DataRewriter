@@ -155,6 +155,42 @@ public final class GuiRecipeSaver {
         return recipes;
     }
 
+    /** Content of our last write; a different file on the next read means someone else edited it. */
+    private static String lastWritten;
+    private static String pendingNotice;
+
+    /**
+     * On reload: true when the file no longer matches what the in-game editor
+     * last wrote this session — i.e. something else (a panel file editor
+     * saving a stale copy, a modpack sync) overwrote in-game edits.
+     */
+    public static synchronized boolean changedSinceLastSave() {
+        if (lastWritten == null) {
+            return false;
+        }
+        Path file = FabricLoader.getInstance().getConfigDir().resolve(Datarewriter.MOD_ID).resolve(FILE_NAME);
+        try {
+            String raw = Files.exists(file) ? Files.readString(file) : "";
+            if (raw.equals(lastWritten)) {
+                return false;
+            }
+            Datarewriter.LOGGER.warn("Recipe editor: {} differs from what the in-game editor last wrote — "
+                    + "in-game edits may have been overwritten (panel file editor / modpack sync?)",
+                    file.toAbsolutePath());
+            lastWritten = null; // report once
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** One-shot warning collected by the last save (external edit detected), or null. */
+    public static synchronized String takeNotice() {
+        String notice = pendingNotice;
+        pendingNotice = null;
+        return notice;
+    }
+
     private static JsonObject readRoot() throws IOException {
         Path file = FabricLoader.getInstance().getConfigDir()
                 .resolve(Datarewriter.MOD_ID).resolve(FILE_NAME);
@@ -162,7 +198,15 @@ public final class GuiRecipeSaver {
             return new JsonObject();
         }
         try {
-            String content = ConfigLoader.stripCommentsAndTrailingCommas(Files.readString(file));
+            String raw = Files.readString(file);
+            if (lastWritten != null && !raw.equals(lastWritten)) {
+                pendingNotice = "note: " + FILE_NAME + " was changed on disk by something else since the last in-game save "
+                + "(a server panel file editor still open on it?) — this edit was merged onto the current file, "
+                + "but earlier in-game edits may have been overwritten if that editor saved an old copy. "
+                + "Close/reload panel editors before saving in game.";
+                Datarewriter.LOGGER.warn("Recipe editor: {} was modified outside the game since the last save", file.toAbsolutePath());
+            }
+            String content = ConfigLoader.stripCommentsAndTrailingCommas(raw);
             JsonReader reader = new JsonReader(new StringReader(content));
             reader.setLenient(true);
             if (JsonParser.parseReader(reader) instanceof JsonObject existing) {
@@ -180,7 +224,9 @@ public final class GuiRecipeSaver {
         Path dir = FabricLoader.getInstance().getConfigDir().resolve(Datarewriter.MOD_ID);
         try {
             Files.createDirectories(dir);
-            Files.writeString(dir.resolve(FILE_NAME), BANNER + GSON.toJson(root) + "\n");
+            String out = BANNER + GSON.toJson(root) + "\n";
+            Files.writeString(dir.resolve(FILE_NAME), out);
+            lastWritten = out;
             Datarewriter.LOGGER.info("Recipe editor: wrote {}", dir.resolve(FILE_NAME).toAbsolutePath());
         } catch (IOException e) {
             throw new IOException("could not write " + FILE_NAME + ": " + e.getMessage());

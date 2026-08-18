@@ -467,6 +467,10 @@ public final class LootEditNetworking {
     }
 
     private static void succeed(ServerPlayer player, String message) {
+        String notice = GuiLootSaver.takeNotice();
+        if (notice != null) {
+            message += " (" + notice + ")";
+        }
         player.sendSystemMessage(prefix().append(Component.literal(message).withStyle(ChatFormatting.GRAY)));
         if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
             ServerPlayNetworking.send(player, new LootPayloads.SaveResult(true, message));

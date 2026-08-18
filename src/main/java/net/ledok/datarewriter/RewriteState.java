@@ -2,6 +2,8 @@ package net.ledok.datarewriter;
 
 import com.google.gson.JsonElement;
 import net.ledok.datarewriter.config.ConfigLoader;
+import net.ledok.datarewriter.config.GuiLootSaver;
+import net.ledok.datarewriter.config.GuiRecipeSaver;
 import net.ledok.datarewriter.config.RewriteConfig;
 import net.minecraft.resources.ResourceLocation;
 
@@ -62,10 +64,20 @@ public final class RewriteState {
 
     /** Called by the earliest hook of a (re)load — the loot table scan. */
     public static RewriteConfig reloadConfig() {
+        externallyChangedFiles = new ArrayList<>();
+        if (GuiLootSaver.changedSinceLastSave()) {
+            externallyChangedFiles.add(GuiLootSaver.FILE_NAME);
+        }
+        if (GuiRecipeSaver.changedSinceLastSave()) {
+            externallyChangedFiles.add(GuiRecipeSaver.FILE_NAME);
+        }
         config = ConfigLoader.load();
         loadedOnce = true;
         return config;
     }
+
+    /** GUI config files found overwritten by something else at the last reload (see announce). */
+    private static volatile List<String> externallyChangedFiles = new ArrayList<>();
 
     /**
      * Current config. The loot scan runs before recipes in vanilla's reload
@@ -133,7 +145,7 @@ public final class RewriteState {
         boolean lootInUse = !loaded.lootRemovals().isEmpty() || !loaded.lootAdditions().isEmpty()
                 || !loaded.lootModifications().isEmpty()
                 || !loaded.lootItemReplacements().isEmpty() || !loaded.lootItemRemovals().isEmpty();
-        if (!recipesInUse && !lootInUse && loaded.errorCount() == 0) {
+        if (!recipesInUse && !lootInUse && loaded.errorCount() == 0 && externallyChangedFiles.isEmpty()) {
             return; // mod not in use, stay quiet
         }
 
@@ -174,6 +186,11 @@ public final class RewriteState {
         if (loaded.errorCount() > 0) {
             message.append(Component.literal(" — " + loaded.errorCount() + " config error(s), see log")
                     .withStyle(ChatFormatting.RED));
+        }
+        if (!externallyChangedFiles.isEmpty()) {
+            message.append(Component.literal(" — WARNING: " + String.join(", ", externallyChangedFiles)
+                    + " was overwritten outside the game since the last in-game save (panel file editor / "
+                    + "modpack sync?) — in-game edits made before that may be lost").withStyle(ChatFormatting.RED));
         }
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (player.hasPermissions(2)) {
