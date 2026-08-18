@@ -1097,7 +1097,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
         SlotFormat format = slot.format();
         JsonElement value = switch (format) {
-            case STRING -> new JsonPrimitive(ref);
+            case STRING, ITEM_ID -> new JsonPrimitive(ref);
             case SHORTHAND_RESULT -> {
                 if (count <= 1) {
                     yield new JsonPrimitive(ref);
@@ -1413,7 +1413,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         if (!(value instanceof JsonObject obj)) {
             return null;
         }
-        boolean fluidLike = obj.has("amount") || obj.has("amount_mb") || obj.has("fluid");
+        // "amount" alone isn't proof of a fluid: {"item": {...}, "amount": n}
+        // is an item result with a quantity (Eternal Starlight's alloy).
+        boolean fluidLike = obj.has("fluid") || obj.has("amount_mb")
+                || (obj.has("amount") && !obj.has("item"));
         int count = intOf(obj, "count", intOf(obj, "amount", intOf(obj, "amount_mb", 0)));
         float chance = obj.get("chance") instanceof JsonPrimitive c && c.isNumber() ? c.getAsFloat() : 0;
         String ref = null;

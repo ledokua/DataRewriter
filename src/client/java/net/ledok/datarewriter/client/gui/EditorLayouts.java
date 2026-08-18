@@ -36,7 +36,8 @@ public final class EditorLayouts {
      * entries in their layout files.
      */
     private static final Set<String> HIDDEN_TYPES = Set.of(
-            "herbalbrews:cauldron_brewing" // matches() is always false; one dummy recipe ships
+            "herbalbrews:cauldron_brewing", // matches() is always false; one dummy recipe ships
+            "eternal_starlight:accessory_combination" // dynamic special crafting recipe, no data
     );
 
     private EditorLayouts() {

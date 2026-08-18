@@ -34,7 +34,9 @@ public final class EditorLayout {
         /** {"id": fluid id, "amount_mb": n} — the picker lists fluids. */
         FLUID(false, true),
         /** {"id": fluid id, "amount": n} — fluid with a plain "amount" key. */
-        FLUID_AMOUNT(false, true);
+        FLUID_AMOUNT(false, true),
+        /** Bare "mod:item" string, no tags, no count (registry-by-name item fields). */
+        ITEM_ID(false, false);
 
         public final boolean allowsTags;
         public final boolean counted;
@@ -316,8 +318,9 @@ public final class EditorLayout {
             case "fluid" -> SlotFormat.FLUID;
             case "fluid_amount" -> SlotFormat.FLUID_AMOUNT;
             case "shorthand_result" -> SlotFormat.SHORTHAND_RESULT;
+            case "item_id" -> SlotFormat.ITEM_ID;
             default -> throw new IllegalArgumentException("unknown slot format '" + s
-                    + "' (expected string, ingredient, counted_ingredient, item, item_named, fluid, fluid_amount)");
+                    + "' (expected string, item_id, ingredient, counted_ingredient, item, item_named, fluid, fluid_amount)");
         };
     }
 

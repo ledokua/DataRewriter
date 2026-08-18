@@ -66,6 +66,7 @@ final class BundledLayouts {
             layouts.add(potionsLdBrewing());
         }
         layouts.addAll(CreateLayouts.forInstalledTypes());
+        layouts.addAll(EternalStarlightLayouts.forInstalledTypes());
         return layouts;
     }
 
