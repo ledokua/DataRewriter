@@ -20,6 +20,7 @@ import net.ledok.datarewriter.menu.EditorMenu;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
 import java.util.List;
@@ -159,7 +160,7 @@ public class DataRewriterEmiPlugin implements EmiPlugin {
 
             @Override
             public boolean supportsRecipe(EmiRecipe recipe) {
-                return recipe.getId() != null;
+                return backingRecipe(recipe) != null;
             }
 
             @Override
@@ -169,27 +170,69 @@ public class DataRewriterEmiPlugin implements EmiPlugin {
 
             @Override
             public boolean canCraft(EmiRecipe recipe, EmiCraftContext<EditorMenu> context) {
-                Minecraft minecraft = Minecraft.getInstance();
-                return recipe.getId() != null && minecraft.level != null
-                        && minecraft.level.getRecipeManager().byKey(recipe.getId()).isPresent();
+                return backingRecipe(recipe) != null;
             }
 
             @Override
             public boolean craft(EmiRecipe recipe, EmiCraftContext<EditorMenu> context) {
                 Minecraft minecraft = Minecraft.getInstance();
-                if (recipe.getId() == null || minecraft.level == null
-                        || !(context.getScreen() instanceof RecipeEditorScreen screen)) {
+                RecipeHolder<?> holder = backingRecipe(recipe);
+                if (holder == null || !(context.getScreen() instanceof RecipeEditorScreen screen)) {
                     return false;
                 }
-                RecipeHolder<?> holder = minecraft.level.getRecipeManager()
-                        .byKey(recipe.getId()).orElse(null);
-                if (holder == null || !screen.loadRecipe(holder)) {
+                if (!screen.loadRecipe(holder)) {
                     return false;
                 }
                 minecraft.setScreen(screen);
                 return true;
             }
         });
+    }
+
+    /**
+     * The real recipe behind an EMI recipe card. Plugins often give their
+     * cards synthetic ids (Create: "create:/mixing/&lt;ns&gt;/&lt;path&gt;"),
+     * so try the backing recipe first, then the id itself, then the id with
+     * a "/category/" prefix stripped off.
+     */
+    private static RecipeHolder<?> backingRecipe(EmiRecipe recipe) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) {
+            return null;
+        }
+        try {
+            RecipeHolder<?> backing = recipe.getBackingRecipe();
+            if (backing != null) {
+                return backing;
+            }
+        } catch (Exception ignored) {
+            // some plugins throw from getBackingRecipe; fall through to the id
+        }
+        ResourceLocation id = recipe.getId();
+        if (id == null) {
+            return null;
+        }
+        var manager = minecraft.level.getRecipeManager();
+        RecipeHolder<?> direct = manager.byKey(id).orElse(null);
+        if (direct != null) {
+            return direct;
+        }
+        String path = id.getPath();
+        if (path.startsWith("/")) {
+            String[] parts = path.substring(1).split("/");
+            // "/<category>/<namespace>/<rest...>" — the rest is the recipe path.
+            for (int i = 1; i + 1 < parts.length; i++) {
+                ResourceLocation candidate = ResourceLocation.tryBuild(parts[i],
+                        String.join("/", java.util.Arrays.copyOfRange(parts, i + 1, parts.length)));
+                if (candidate != null) {
+                    RecipeHolder<?> holder = manager.byKey(candidate).orElse(null);
+                    if (holder != null) {
+                        return holder;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private static Object firstKey(EmiIngredient ingredient) {

@@ -91,6 +91,16 @@ public final class GuiRecipeSaver {
         JsonObject recipes = recipesSection(root);
         JsonArray add = recipes.get("add") instanceof JsonArray a ? a : new JsonArray();
         recipes.add("add", add);
+        boolean replacedEntry = false;
+        if (explicitId != null) {
+            // Saving the same id again replaces the earlier entry instead of
+            // stacking a second one (the loader would warn and take the last).
+            String idText = explicitId.toString();
+            replacedEntry = add.asList().removeIf(e -> e instanceof JsonObject obj
+                    && obj.get("id") instanceof JsonPrimitive p && p.isString()
+                    && ResourceLocation.tryParse(p.getAsString()) != null
+                    && ResourceLocation.tryParse(p.getAsString()).toString().equals(idText));
+        }
         add.add(recipe);
 
         try {
