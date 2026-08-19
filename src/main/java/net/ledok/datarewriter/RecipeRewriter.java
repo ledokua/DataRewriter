@@ -7,11 +7,13 @@ import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.JsonOps;
 import net.ledok.datarewriter.config.RewriteConfig;
+import net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateRecipesPacket;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.TagNetworkSerialization;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
@@ -100,11 +102,7 @@ public final class RecipeRewriter {
         recipes.add(holder);
         recipeManager.replaceRecipes(recipes);
         addedIds.add(holder.id());
-
-        ClientboundUpdateRecipesPacket packet = new ClientboundUpdateRecipesPacket(recipeManager.getRecipes());
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.connection.send(packet);
-        }
+        syncRecipes(server);
     }
 
     /**
@@ -113,8 +111,11 @@ public final class RecipeRewriter {
      * replacements.
      */
     public static void applyParsedRules(MinecraftServer server) {
-        applyRemovalRules(server);
-        applyIngredientReplacements(server);
+        boolean changed = applyRemovalRules(server, false) > 0;
+        changed |= applyIngredientReplacements(server, false) > 0;
+        if (changed) {
+            syncRecipes(server);
+        }
     }
 
     /**
@@ -124,6 +125,10 @@ public final class RecipeRewriter {
      * matches, so the count is that rule's own).
      */
     public static int applyRemovalRules(MinecraftServer server) {
+        return applyRemovalRules(server, true);
+    }
+
+    private static int applyRemovalRules(MinecraftServer server, boolean sync) {
         List<RewriteConfig.RemovalRule> rules = RewriteState.config().removals().stream()
                 .filter(RewriteConfig.RemovalRule::needsParsedRecipe)
                 .toList();
@@ -158,7 +163,9 @@ public final class RecipeRewriter {
             return 0;
         }
         recipeManager.replaceRecipes(kept);
-        syncRecipes(server);
+        if (sync) {
+            syncRecipes(server);
+        }
         return removed;
     }
 
@@ -170,6 +177,10 @@ public final class RecipeRewriter {
      * recipes changed.
      */
     public static int applyIngredientReplacements(MinecraftServer server) {
+        return applyIngredientReplacements(server, true);
+    }
+
+    private static int applyIngredientReplacements(MinecraftServer server, boolean sync) {
         List<RewriteConfig.IngredientReplacement> rules = RewriteState.config().ingredientReplacements();
         if (rules.isEmpty()) {
             return 0;
@@ -224,7 +235,9 @@ public final class RecipeRewriter {
             next.add(replacement != null ? replacement : holder);
         }
         recipeManager.replaceRecipes(next);
-        syncRecipes(server);
+        if (sync) {
+            syncRecipes(server);
+        }
         Datarewriter.LOGGER.info("Replaced ingredients in {} recipes", swapped);
         return swapped;
     }
@@ -303,14 +316,24 @@ public final class RecipeRewriter {
     }
 
     /**
-     * Sends the current recipe list to all online players — the vanilla sync
-     * packet, so clients do not need the mod.
+     * Re-syncs recipes to all online players with the same packet sequence
+     * vanilla's /reload uses: tags first, then recipes, then the recipe book.
+     * Vanilla clients only need the recipes packet, but recipe viewers (EMI,
+     * and JEI/REI work the same way) reload only once they have seen a
+     * MATCHED tags+recipes pair — a lone recipes packet leaves their state
+     * machine waiting for tags, and the next join's early tags packet then
+     * completes that stale pair before the client world exists, killing the
+     * reload ("World is null") and freezing the "Reloading..." overlay.
      */
     private static void syncRecipes(MinecraftServer server) {
-        ClientboundUpdateRecipesPacket packet =
+        ClientboundUpdateTagsPacket tags = new ClientboundUpdateTagsPacket(
+                TagNetworkSerialization.serializeTagsToNetwork(server.registries()));
+        ClientboundUpdateRecipesPacket recipes =
                 new ClientboundUpdateRecipesPacket(server.getRecipeManager().getRecipes());
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.connection.send(packet);
+            player.connection.send(tags);
+            player.connection.send(recipes);
+            player.getRecipeBook().sendInitialRecipeBook(player);
         }
     }
 }
