@@ -10,6 +10,7 @@ import dev.emi.emi.api.recipe.handler.EmiCraftContext;
 import dev.emi.emi.api.recipe.handler.EmiRecipeHandler;
 import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
+import dev.emi.emi.api.stack.EmiStackInteraction;
 import dev.emi.emi.api.widget.Bounds;
 import net.ledok.datarewriter.client.gui.CompositeEntryScreen;
 import net.ledok.datarewriter.client.gui.ItemSelectScreen;
@@ -20,8 +21,13 @@ import net.ledok.datarewriter.menu.EditorMenu;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.level.material.Fluid;
 
 import java.util.List;
 
@@ -148,6 +154,21 @@ public class DataRewriterEmiPlugin implements EmiPlugin {
             return new Bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
         });
 
+        // R/U (recipes/uses) over our screens. EMI reads the hovered stack from
+        // the screen's Slot list, and our menus are slot-less — without these
+        // providers both the editor's own slots and the inventory panel are
+        // invisible to it. Never clickable: clicks stay ours (picking items up).
+        registry.addStackProvider(RecipeEditorScreen.class,
+                (screen, x, y) -> interaction(screen.emiStackAt(x, y)));
+        registry.addStackProvider(LootTableEditorScreen.class,
+                (screen, x, y) -> interaction(screen.emiStackAt(x, y)));
+        registry.addStackProvider(CompositeEntryScreen.class,
+                (screen, x, y) -> interaction(screen.emiStackAt(x, y)));
+        registry.addStackProvider(RecipeTweaksScreen.class,
+                (screen, x, y) -> interaction(screen.emiStackAt(x, y)));
+        registry.addStackProvider(ItemSelectScreen.class,
+                (screen, x, y) -> interaction(screen.emiStackAt(x, y)));
+
         // The AE2-style fill button on EMI recipe cards: loads the viewed
         // recipe into the editor (nothing is crafted or consumed).
         registry.addRecipeHandler(EditorMenu.TYPE, new EmiRecipeHandler<>() {
@@ -231,6 +252,35 @@ public class DataRewriterEmiPlugin implements EmiPlugin {
                     }
                 }
             }
+        }
+        return null;
+    }
+
+    /**
+     * Wraps what a screen reports under the cursor (an ItemStack, an Item, a
+     * Fluid or a "#tag" string) as an EMI interaction. Marked not-clickable:
+     * hover lookups like R/U still work, while mouse clicks keep going to the
+     * editor instead of being swallowed by EMI.
+     */
+    private static EmiStackInteraction interaction(Object hovered) {
+        EmiIngredient ingredient = ingredient(hovered);
+        return ingredient == null ? EmiStackInteraction.EMPTY
+                : new EmiStackInteraction(ingredient, null, false);
+    }
+
+    private static EmiIngredient ingredient(Object hovered) {
+        if (hovered instanceof ItemStack stack) {
+            return EmiStack.of(stack);
+        }
+        if (hovered instanceof Item item) {
+            return EmiStack.of(item);
+        }
+        if (hovered instanceof Fluid fluid) {
+            return EmiStack.of(fluid);
+        }
+        if (hovered instanceof String ref && ref.startsWith("#")) {
+            ResourceLocation id = ResourceLocation.tryParse(ref.substring(1));
+            return id == null ? null : EmiIngredient.of(TagKey.create(Registries.ITEM, id));
         }
         return null;
     }

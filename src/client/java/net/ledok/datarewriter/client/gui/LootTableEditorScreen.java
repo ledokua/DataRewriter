@@ -1647,6 +1647,30 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
 
     // --- EMI hooks ----------------------------------------------------------
 
+    /**
+     * EMI stack lookups (R/U). The editor menu has no real slots, so EMI finds
+     * nothing on its own: entry slots answer with their ref (item or tag),
+     * the inventory panel with the actual stack under the cursor.
+     */
+    public Object emiStackAt(int x, int y) {
+        int[] hit = entryAt(x, y);
+        if (hit != null) {
+            PoolState pool = pools.get(hit[0]);
+            if (hit[1] >= pool.entries.size()) {
+                return null; // the trailing "add here" slot
+            }
+            EntryState entry = pool.entries.get(hit[1]);
+            return entry.kind == Kind.ITEM || entry.kind == Kind.TAG
+                    ? EmiHover.itemOrTag(entry.ref) : null;
+        }
+        int slot = invSlotAt(x, y);
+        if (slot >= 0 && minecraft != null && minecraft.player != null) {
+            ItemStack stack = minecraft.player.getInventory().items.get(slot);
+            return stack.isEmpty() ? null : stack;
+        }
+        return null;
+    }
+
     /** EMI drag & drop: set an entry, or add to the pool dropped on. */
     public boolean emiDrop(int x, int y, Object key) {
         if (!(key instanceof Item item)) {

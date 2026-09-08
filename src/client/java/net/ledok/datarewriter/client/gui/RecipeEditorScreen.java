@@ -869,6 +869,26 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         return null;
     }
 
+    /**
+     * EMI stack lookups (R/U). The editor menu has no real slots, so EMI finds
+     * nothing on its own: recipe slots answer with their ref, the inventory
+     * panel with the actual stack under the cursor.
+     */
+    public Object emiStackAt(int x, int y) {
+        int index = slotAt(x, y);
+        if (index >= 0) {
+            String ref = refs()[index];
+            return layout.slots.get(index).format().fluid()
+                    ? EmiHover.fluid(ref) : EmiHover.itemOrTag(ref);
+        }
+        int slot = invSlotAt(x, y);
+        if (slot >= 0 && minecraft != null && minecraft.player != null) {
+            ItemStack stack = minecraft.player.getInventory().items.get(slot);
+            return stack.isEmpty() ? null : stack;
+        }
+        return null;
+    }
+
     /** EMI drag & drop: place a dragged item/fluid at screen coordinates. */
     public boolean emiDrop(int x, int y, Object key) {
         int index = slotAt(x, y);

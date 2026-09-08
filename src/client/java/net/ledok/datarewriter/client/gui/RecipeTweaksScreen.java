@@ -257,6 +257,15 @@ public class RecipeTweaksScreen extends AbstractContainerScreen<LootEditorMenu> 
 
     // --- EMI hooks ----------------------------------------------------------
 
+    /** EMI stack lookups (R/U): the from/to slot under the cursor. */
+    public Object emiStackAt(int x, int y) {
+        int slot = slotAt(x, y);
+        if (slot < 0) {
+            return null;
+        }
+        return EmiHover.itemOrTag(slot == 0 ? lastFrom : lastTo);
+    }
+
     /** EMI drag & drop: a slot sets that slot, anywhere else sets 'from'. */
     public boolean emiDrop(int x, int y, Object key) {
         if (!(key instanceof Item item)) {

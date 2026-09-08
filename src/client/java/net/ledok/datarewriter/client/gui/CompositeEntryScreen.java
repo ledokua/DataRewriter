@@ -324,6 +324,18 @@ public class CompositeEntryScreen extends AbstractContainerScreen<LootEditorMenu
 
     // --- EMI hooks --------------------------------------------------------
 
+    /** EMI stack lookups (R/U): the child entry under the cursor. */
+    public Object emiStackAt(int x, int y) {
+        int index = slotAt(x, y);
+        if (index < 0 || index >= composite.children.size()) {
+            return null;
+        }
+        LootTableEditorScreen.EntryState entry = composite.children.get(index);
+        return entry.kind == LootTableEditorScreen.Kind.ITEM
+                || entry.kind == LootTableEditorScreen.Kind.TAG
+                ? EmiHover.itemOrTag(entry.ref) : null;
+    }
+
     /** EMI drag & drop: set a child, or append when dropped on the add-slot. */
     public boolean emiDrop(int x, int y, Object key) {
         if (!(key instanceof Item item)) {

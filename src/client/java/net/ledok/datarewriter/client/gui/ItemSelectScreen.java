@@ -164,6 +164,20 @@ public class ItemSelectScreen extends AbstractContainerScreen<LootEditorMenu> {
 
     // --- EMI hooks --------------------------------------------------------
 
+    /** EMI stack lookups (R/U): the inventory item under the cursor. */
+    public Object emiStackAt(int x, int y) {
+        assert minecraft != null && minecraft.player != null;
+        if (x < gridLeft || x >= gridLeft + COLS * 18 || y < gridTop || y >= gridTop + ROWS * 18) {
+            return null;
+        }
+        int index = ((y - gridTop) / 18) * COLS + (x - gridLeft) / 18;
+        List<ItemStack> items = minecraft.player.getInventory().items;
+        if (index < 0 || index >= items.size() || items.get(index).isEmpty()) {
+            return null;
+        }
+        return items.get(index);
+    }
+
     /** EMI drag & drop: releasing an item anywhere over the window picks it. */
     public boolean emiDrop(int x, int y, Object key) {
         if (!(key instanceof Item item)) {
