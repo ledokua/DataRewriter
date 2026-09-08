@@ -21,6 +21,18 @@ loom {
     }
 }
 
+// Screenshot harness (see "Notes for developers" in the README):
+//   ./gradlew runClient -PscreenshotTypes=create:mixing,loot:minecraft:entities/zombie
+//                       [-PscreenshotSample=true] --args="--quickPlaySingleplayer <world>"
+// opens the editor on each type in turn, saves screenshots/<name>.png and quits.
+tasks.named("runClient") {
+    ["screenshotTypes", "screenshotSample"].each { name ->
+        if (project.hasProperty(name)) {
+            systemProperty("datarewriter.$name", project.property(name))
+        }
+    }
+}
+
 
 repositories {
     maven {

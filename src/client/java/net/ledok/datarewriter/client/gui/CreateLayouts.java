@@ -99,6 +99,9 @@ final class CreateLayouts {
         }
     }
 
+    /** Inset of the first slot in a panel drawn by us (the frame art starts one pixel earlier). */
+    private static final int PAD = 6;
+
     // ---- slot helpers -------------------------------------------------------
 
     private static SlotDef in(int x, int y, boolean required) {
@@ -414,18 +417,30 @@ final class CreateLayouts {
                 });
     }
 
-    /** 5x5 mechanical crafter grid (Create's own recipes go up to 5x5), result on the right. */
+    /**
+     * Mechanical crafter grid, with the crafter/result column beside it. The
+     * grid is 9x9: Create raises vanilla's 3x3 pattern cap that far (its own
+     * recipes stop at 5x5). Empty rows and columns are trimmed when saving,
+     * so a 2x2 recipe drawn anywhere in the grid saves as a 2x2 pattern.
+     */
     private static EditorLayout mechanicalCrafting() {
+        int grid = 9;
+        int pitch = 19;
+        int gridRight = PAD + (grid - 1) * pitch + 16;
+        // Right column: crafter art on top, arrow, result slot. Kept clear of
+        // the grid by the width of the crafter's shadow, and centred on it.
+        int columnX = gridRight + 26;
+        int columnY = (PAD - 1 + gridRight) / 2 - 36;
         List<SlotDef> slots = new ArrayList<>();
-        int grid = 5;
         for (int row = 0; row < grid; row++) {
             for (int col = 0; col < grid; col++) {
-                slots.add(new SlotDef(6 + col * 19, 6 + row * 19, "", SlotFormat.STRING, false, false));
+                slots.add(new SlotDef(PAD + col * pitch, PAD + row * pitch, "",
+                        SlotFormat.STRING, false, false));
             }
         }
-        slots.add(new SlotDef(134, 81, "result", SlotFormat.ITEM, true, true));
+        slots.add(new SlotDef(columnX + 5, columnY + 56, "result", SlotFormat.ITEM, true, true));
         EditorLayout layout = new EditorLayout("create:mechanical_crafting", "Mechanical crafting (Create)",
-                null, 0, 0, 177, 107, Kind.SHAPED, slots, List.of(MIRRORED));
+                null, 0, 0, columnX + 40, gridRight + PAD, Kind.SHAPED, slots, List.of(MIRRORED));
         layout.gridSize = grid;
         layout.ownSlotArt = true;
         layout.decoration = (graphics, left, top, partialTick, view) -> {
@@ -436,9 +451,9 @@ final class CreateLayouts {
                 SlotDef slot = slots.get(i);
                 slotFrame(graphics, slot.x(), slot.y(), false);
             }
-            slotFrame(graphics, 134, 81, false);
-            downArrow(graphics, 128, 59);
-            crafter(graphics, 129, 25);
+            slotFrame(graphics, columnX + 5, columnY + 56, false);
+            downArrow(graphics, columnX - 1, columnY + 34);
+            crafter(graphics, columnX, columnY);
             int amount = 0;
             for (int i = 0; i < grid * grid; i++) {
                 if (view.ref(i) != null) {
@@ -447,7 +462,8 @@ final class CreateLayouts {
             }
             pose.pushPose();
             pose.translate(0, 0, 300);
-            graphics.drawString(Minecraft.getInstance().font, String.valueOf(amount), 142, 39, 0xFFFFFF);
+            graphics.drawString(Minecraft.getInstance().font, String.valueOf(amount),
+                    columnX + 13, columnY + 14, 0xFFFFFF);
             pose.popPose();
             pose.popPose();
         };

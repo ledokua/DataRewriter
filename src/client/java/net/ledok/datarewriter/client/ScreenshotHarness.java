@@ -9,6 +9,7 @@ import net.minecraft.client.Screenshot;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayDeque;
 import java.util.List;
@@ -64,6 +65,11 @@ final class ScreenshotHarness {
                 return;
             }
             timer[0]++;
+            if (timer[0] == 5) {
+                // Park the cursor in the corner: whatever it hovers draws a
+                // tooltip over the layout and hides the very thing being checked.
+                GLFW.glfwSetCursorPos(client.getWindow().getWindow(), 2, 2);
+            }
             if (timer[0] == 40) {
                 Screenshot.grab(client.gameDirectory, current[0].replace(':', '_').replace('/', '_') + ".png",
                         client.getMainRenderTarget(), message -> Datarewriter.LOGGER.info("[screenshots] {}", message.getString()));
