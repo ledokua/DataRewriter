@@ -33,6 +33,13 @@ public final class RecipeRewriter {
     // so "remove everything from minecraft:" + a replacement recipe works.
     private static final Set<ResourceLocation> addedIds = ConcurrentHashMap.newKeySet();
 
+    // Live edits apply to the server immediately, but the client-side recipe
+    // list is only pushed on demand: every push makes recipe viewers (EMI,
+    // JEI, REI) drop everything and reload, which takes seconds on a big pack
+    // and would interrupt whoever is still editing. This counts edits made
+    // since the last push — see pushToClients / '/datarewriter reload'.
+    private static volatile int pendingClientEdits;
+
     private RecipeRewriter() {
     }
 
@@ -87,9 +94,10 @@ public final class RecipeRewriter {
 
     /**
      * Adds (or replaces) one already-parsed recipe in the running RecipeManager
-     * and re-syncs clients — no data reload. Used by the recipe editor; the
-     * recipe is also persisted to the config, so the next real reload produces
-     * the same state.
+     * — no data reload. Used by the recipe editor; the recipe is also persisted
+     * to the config, so the next real reload produces the same state. Crafting
+     * uses it at once (the server is authoritative); connected clients only see
+     * it in their recipe list after the next push (see {@link #pushToClients}).
      */
     public static void applyLive(MinecraftServer server, RecipeHolder<?> holder) {
         RecipeManager recipeManager = server.getRecipeManager();
@@ -102,7 +110,7 @@ public final class RecipeRewriter {
         recipes.add(holder);
         recipeManager.replaceRecipes(recipes);
         addedIds.add(holder.id());
-        syncRecipes(server);
+        pendingClientEdits++;
     }
 
     /**
@@ -113,6 +121,8 @@ public final class RecipeRewriter {
     public static void applyParsedRules(MinecraftServer server) {
         boolean changed = applyRemovalRules(server, false) > 0;
         changed |= applyIngredientReplacements(server, false) > 0;
+        // A data reload has just pushed the un-rewritten list to everyone, so
+        // this correction has to go out now — viewers are reloading anyway.
         if (changed) {
             syncRecipes(server);
         }
@@ -128,7 +138,7 @@ public final class RecipeRewriter {
         return applyRemovalRules(server, true);
     }
 
-    private static int applyRemovalRules(MinecraftServer server, boolean sync) {
+    private static int applyRemovalRules(MinecraftServer server, boolean markStale) {
         List<RewriteConfig.RemovalRule> rules = RewriteState.config().removals().stream()
                 .filter(RewriteConfig.RemovalRule::needsParsedRecipe)
                 .toList();
@@ -163,8 +173,8 @@ public final class RecipeRewriter {
             return 0;
         }
         recipeManager.replaceRecipes(kept);
-        if (sync) {
-            syncRecipes(server);
+        if (markStale) {
+            pendingClientEdits++;
         }
         return removed;
     }
@@ -180,7 +190,7 @@ public final class RecipeRewriter {
         return applyIngredientReplacements(server, true);
     }
 
-    private static int applyIngredientReplacements(MinecraftServer server, boolean sync) {
+    private static int applyIngredientReplacements(MinecraftServer server, boolean markStale) {
         List<RewriteConfig.IngredientReplacement> rules = RewriteState.config().ingredientReplacements();
         if (rules.isEmpty()) {
             return 0;
@@ -235,8 +245,8 @@ public final class RecipeRewriter {
             next.add(replacement != null ? replacement : holder);
         }
         recipeManager.replaceRecipes(next);
-        if (sync) {
-            syncRecipes(server);
+        if (markStale) {
+            pendingClientEdits++;
         }
         Datarewriter.LOGGER.info("Replaced ingredients in {} recipes", swapped);
         return swapped;
@@ -315,6 +325,23 @@ public final class RecipeRewriter {
         return lower.contains("result") || lower.equals("output") || lower.equals("outputs");
     }
 
+    /** Live edits made since the last push to clients (0 = viewers are current). */
+    public static int pendingClientEdits() {
+        return pendingClientEdits;
+    }
+
+    /**
+     * Pushes the current recipe list to every connected client, which is what
+     * makes edits show up in EMI/JEI/REI and the recipe book. Returns the
+     * number of edits this push carried. Players joining later get the live
+     * list in their join packet, so this only concerns clients already online.
+     */
+    public static int pushToClients(MinecraftServer server) {
+        int carried = pendingClientEdits;
+        syncRecipes(server);
+        return carried;
+    }
+
     /**
      * Re-syncs recipes to all online players with the same packet sequence
      * vanilla's /reload uses: tags first, then recipes, then the recipe book.
@@ -326,6 +353,7 @@ public final class RecipeRewriter {
      * reload ("World is null") and freezing the "Reloading..." overlay.
      */
     private static void syncRecipes(MinecraftServer server) {
+        pendingClientEdits = 0;
         ClientboundUpdateTagsPacket tags = new ClientboundUpdateTagsPacket(
                 TagNetworkSerialization.serializeTagsToNetwork(server.registries()));
         ClientboundUpdateRecipesPacket recipes =

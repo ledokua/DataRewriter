@@ -11,6 +11,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.ledok.datarewriter.LootLiveApplier;
+import net.ledok.datarewriter.RecipeRewriter;
 import net.ledok.datarewriter.RewriteState;
 import net.ledok.datarewriter.config.ConfigLoader;
 import net.ledok.datarewriter.config.RewriteConfig;
@@ -77,7 +78,32 @@ public final class ListCommand {
                         .then(Commands.literal("status")
                                 .executes(ctx -> showStatus(ctx.getSource())))
                         .then(Commands.literal("hand")
-                                .executes(ctx -> showHand(ctx.getSource())))));
+                                .executes(ctx -> showHand(ctx.getSource())))
+                        .then(Commands.literal("reload")
+                                .executes(ctx -> refreshClients(ctx.getSource())))));
+    }
+
+    /**
+     * /datarewriter reload — pushes the live recipe list to everyone online, so
+     * edits made in the editor show up in EMI/JEI/REI and the recipe book. The
+     * edits themselves are already active server-side; this is only the client
+     * refresh, kept manual because every push makes recipe viewers reload from
+     * scratch (seconds on a big pack) and that would interrupt editing.
+     */
+    private static int refreshClients(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        int players = server.getPlayerList().getPlayers().size();
+        int edits = RecipeRewriter.pushToClients(server);
+        Datarewriter.LOGGER.info("Recipe list pushed to {} player(s), carrying {} live edit(s)", players, edits);
+        source.sendSuccess(() -> Component.literal("[DataRewriter] ").withStyle(ChatFormatting.GOLD)
+                .append(Component.literal("Recipe list sent to " + players + " player"
+                                + (players == 1 ? "" : "s")
+                                + (edits > 0 ? " — " + edits + " edit" + (edits == 1 ? "" : "s") + " included."
+                                : " — there were no pending edits.")
+                                + " Recipe viewers refresh on their own now; config files are not re-read "
+                                + "(use /reload for that).")
+                        .withStyle(ChatFormatting.GRAY)), true);
+        return edits;
     }
 
     /**
@@ -128,6 +154,11 @@ public final class ListCommand {
             RewriteConfig.LootRule target = modification.target();
             lines.add("loot modify " + (target.id() != null ? target.id().toString() : "mod " + target.mod())
                     + " — " + modification.pools().size() + " pools appended (from " + target.source() + ")");
+        }
+        int pending = RecipeRewriter.pendingClientEdits();
+        if (pending > 0) {
+            lines.add(pending + " live recipe edit(s) not pushed to clients yet — run /datarewriter reload "
+                    + "to refresh EMI/JEI/REI (crafting already uses them)");
         }
         lines.add("recipes: " + config.removals().size() + " removal rules, " + config.additions().size()
                 + " added, " + config.ingredientReplacements().size() + " ingredient replacements; loot: "

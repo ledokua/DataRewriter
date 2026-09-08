@@ -10,7 +10,9 @@ import net.ledok.datarewriter.config.GuiRecipeSaver;
 import net.ledok.datarewriter.config.ItemMatch;
 import net.ledok.datarewriter.config.RewriteConfig;
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 
@@ -114,12 +116,32 @@ public final class RecipeSaveNetworking {
         }
     }
 
+    /**
+     * Reports a save that worked. The edit is already live on the server, but
+     * the client-side recipe list is only pushed on demand — pushing it makes
+     * EMI/JEI/REI reload from scratch, which would interrupt an editing session
+     * after every save. So the answer carries the refresh reminder (the editor
+     * screen shows it, where chat isn't visible) plus a chat button to do it.
+     */
     private static void succeed(net.minecraft.server.level.ServerPlayer player, String message) {
         String notice = GuiRecipeSaver.takeNotice();
         if (notice != null) {
             message += " (" + notice + ")";
         }
+        int pending = RecipeRewriter.pendingClientEdits();
+        if (pending > 0) {
+            message += " Keep editing — " + pending + " edit" + (pending == 1 ? " is" : "s are")
+                    + " waiting for /datarewriter reload to show up in EMI.";
+        }
         player.sendSystemMessage(prefix().append(Component.literal(message).withStyle(ChatFormatting.GRAY)));
+        if (pending > 0) {
+            player.sendSystemMessage(prefix().append(Component.literal("[Refresh recipe list now]")
+                    .withStyle(style -> style.withColor(ChatFormatting.GREEN)
+                            .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,
+                                    "/datarewriter reload"))
+                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                    Component.literal("/datarewriter reload"))))));
+        }
         if (ServerPlayNetworking.canSend(player, LootPayloads.SaveResult.TYPE)) {
             ServerPlayNetworking.send(player, new LootPayloads.SaveResult(true, message));
         }
