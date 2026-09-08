@@ -236,6 +236,8 @@ Two limits: a type only appears if at least one recipe of it is currently loaded
 
 ### Editor layouts — manual override
 
+Ingredients are written in the object form recipes actually use (`{"item": …}` / `{"tag": …}`); in hand-written config files you may also use the plain-string shorthand (`"minecraft:oak_log"`, `"#minecraft:planks"`) for the vanilla types and for anything built on the vanilla `pattern`/`key` structure, such as Create's mechanical crafting.
+
 For full control — the mod's real GUI texture, exact slot positions, required flags, corrected field mappings — write a layout in `config/datarewriter/editor-layouts/*.json5` **on the client**; it replaces the auto layout for that type. In its minimal form (generic panel, auto-placed slots) a layout is just the JSON mapping:
 
 ```json5

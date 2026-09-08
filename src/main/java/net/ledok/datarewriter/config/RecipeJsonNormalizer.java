@@ -11,15 +11,22 @@ import java.util.List;
 /**
  * Lets users write ingredients as plain strings ("minecraft:oak_log",
  * "#minecraft:planks") in added recipes. Vanilla 1.21.1 requires the object
- * form ({"item": ...} / {"tag": ...}), so this expands the shorthand for the
- * known vanilla recipe types before the JSON is handed to the recipe codec.
- * Unknown / modded recipe types are left untouched.
+ * form ({"item": ...} / {"tag": ...}), so this expands the shorthand before the
+ * JSON is handed to the recipe codec: for the known vanilla recipe types, and
+ * for any recipe built on vanilla's pattern/key structure whatever its type —
+ * mods embed that codec as-is (Create's mechanical crafting, for one), so the
+ * values there are always plain ingredients. Everything else is left untouched,
+ * since only the type's own codec knows what its fields mean.
  */
 final class RecipeJsonNormalizer {
     private RecipeJsonNormalizer() {
     }
 
     static void normalize(JsonObject recipe) {
+        if (recipe.get("pattern") instanceof JsonArray && recipe.get("key") instanceof JsonObject) {
+            normalizeKeyMap(recipe);
+            normalizeResult(recipe);
+        }
         String typeStr = recipe.get("type") != null && recipe.get("type").isJsonPrimitive()
                 ? recipe.get("type").getAsString() : null;
         ResourceLocation type = typeStr != null ? ResourceLocation.tryParse(typeStr) : null;

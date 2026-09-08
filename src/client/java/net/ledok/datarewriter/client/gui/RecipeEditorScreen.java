@@ -1093,7 +1093,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             pattern.add(line.toString());
         }
         JsonObject key = new JsonObject();
-        letters.forEach((ref, letter) -> key.addProperty(String.valueOf(letter), ref));
+        // Ingredient objects, not the bare-string shorthand: 1.21.1's Ingredient
+        // codec only accepts {"item"}/{"tag"} (or a list of them), and the config
+        // loader's shorthand expansion is a convenience for hand-written files.
+        letters.forEach((ref, letter) -> key.add(String.valueOf(letter), ingredientObj(ref)));
         recipe.add("pattern", pattern);
         recipe.add("key", key);
     }
@@ -1102,7 +1105,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         JsonArray ingredients = new JsonArray();
         for (int i = 0; i < layout.gridSize * layout.gridSize; i++) {
             if (refs[i] != null) {
-                ingredients.add(refs[i]);
+                ingredients.add(ingredientObj(refs[i]));
             }
         }
         if (ingredients.isEmpty()) {
