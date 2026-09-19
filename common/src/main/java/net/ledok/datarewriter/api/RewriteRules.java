@@ -61,6 +61,9 @@ public final class RewriteRules {
         private final List<RewriteConfig.LootModification> lootModifications = new ArrayList<>();
         private final List<RewriteConfig.LootItemReplacement> lootItemReplacements = new ArrayList<>();
         private final List<RewriteConfig.LootItemRemoval> lootItemRemovals = new ArrayList<>();
+        private final List<RewriteConfig.RegistryRemoval> registryRemovals = new ArrayList<>();
+        private final List<RewriteConfig.RegistryAddition> registryAdditions = new ArrayList<>();
+        private final List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
 
         public Builder(String source) {
             this.source = source;
@@ -160,11 +163,47 @@ public final class RewriteRules {
             return this;
         }
 
+        // ---- datapack registries ----
+
+        /**
+         * {@code registries.remove}: skips loading matching entries ({@code *} wildcards) of the
+         * datapack registry. Applied at world load, never on {@code /reload}; removing an entry other
+         * data references by id fails world loading, like a datapack deleting the file would.
+         */
+        public Builder removeRegistryEntries(ResourceLocation registry, String idPattern) {
+            registryRemovals.add(new RewriteConfig.RegistryRemoval(Objects.requireNonNull(registry),
+                    idPattern(idPattern), source));
+            return this;
+        }
+
+        /** {@code registries.add}: an entry in the registry's own JSON format; an existing id is replaced. Applied at world load. */
+        public Builder addRegistryEntry(ResourceLocation registry, ResourceLocation id, JsonObject entry) {
+            registryAdditions.add(new RewriteConfig.RegistryAddition(Objects.requireNonNull(registry),
+                    Objects.requireNonNull(id), entry.deepCopy(), source));
+            return this;
+        }
+
+        /**
+         * {@code registries.modify}: merges {@code merge} into matching entries ({@code *} wildcards) —
+         * objects merge recursively, everything else is replaced, JSON null deletes a key. Applied at
+         * world load; an entry that no longer parses loads unchanged.
+         */
+        public Builder modifyRegistryEntries(ResourceLocation registry, String idPattern, JsonObject merge) {
+            if (merge.isEmpty()) {
+                throw new IllegalArgumentException("a registry modification needs a non-empty merge object");
+            }
+            registryModifications.add(new RewriteConfig.RegistryModification(Objects.requireNonNull(registry),
+                    idPattern(idPattern), merge.deepCopy(), source));
+            return this;
+        }
+
         /** The collected rules as one config fragment (error count 0). */
         public RewriteConfig build() {
             return new RewriteConfig(List.copyOf(removals), List.copyOf(additions), List.copyOf(ingredientReplacements),
                     List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
-                    List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals), 0);
+                    List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
+                    List.copyOf(registryRemovals), List.copyOf(registryAdditions),
+                    List.copyOf(registryModifications), 0);
         }
 
         private static IdPattern idPattern(String value) {

@@ -5,6 +5,7 @@ import net.ledok.datarewriter.client.gui.LootTablePickerScreen;
 import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
 import net.ledok.datarewriter.client.gui.RecipeTweaksScreen;
 import net.ledok.datarewriter.network.LootPayloads;
+import net.ledok.datarewriter.network.RegistryPayloads;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -88,6 +89,12 @@ public final class DatarewriterClient {
     public static void onTableContent(Minecraft client, LootPayloads.TableContent payload) {
         if (client.screen instanceof LootTableEditorScreen editor && editor.tableId.equals(payload.tableId())) {
             editor.onContent(payload.json(), payload.injected());
+        }
+    }
+
+    public static void onRegistryEntry(Minecraft client, RegistryPayloads.EntryContent payload) {
+        if (client.screen instanceof RecipeEditorScreen editor) {
+            editor.onRegistryEntry(payload.registry(), payload.entryId(), payload.json());
         }
     }
 }

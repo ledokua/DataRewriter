@@ -2,6 +2,7 @@ package net.ledok.datarewriter.config;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -25,10 +26,47 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
                             List<LootModification> lootModifications,
                             List<LootItemReplacement> lootItemReplacements,
                             List<LootItemRemoval> lootItemRemovals,
+                            List<RegistryRemoval> registryRemovals,
+                            List<RegistryAddition> registryAdditions,
+                            List<RegistryModification> registryModifications,
                             int errorCount) {
     public static final RewriteConfig EMPTY =
             new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), 0);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+
+    /**
+     * Skips loading every entry of the datapack registry {@code registry} whose id matches (with '*'
+     * wildcards). Applied while the world's registries load — never on /reload. An entry another data
+     * file references by id must not be removed: the reference cannot resolve and world loading fails,
+     * exactly as if a datapack had deleted the file.
+     */
+    public record RegistryRemoval(ResourceLocation registry, IdPattern id, String source) {
+        public boolean matches(ResourceLocation registryId, ResourceLocation entryId) {
+            return this.registry.equals(registryId) && this.id.matches(entryId);
+        }
+    }
+
+    /**
+     * A new (or replacement) entry of the datapack registry {@code registry}, in that registry's own
+     * JSON format. An existing id is replaced wholesale; a new id is registered after the datapack
+     * files. Applied while the world's registries load — never on /reload.
+     */
+    public record RegistryAddition(ResourceLocation registry, ResourceLocation id, JsonElement entry,
+                                   String source) {
+    }
+
+    /**
+     * Merges {@code merge} into every entry of {@code registry} whose id matches (with '*' wildcards):
+     * objects merge recursively, everything else (arrays included) is replaced, and a JSON null deletes
+     * the key. An entry that no longer parses after the merge is loaded unchanged and the failure is
+     * logged. Applied while the world's registries load — never on /reload.
+     */
+    public record RegistryModification(ResourceLocation registry, IdPattern id, JsonObject merge,
+                                       String source) {
+        public boolean matches(ResourceLocation registryId, ResourceLocation entryId) {
+            return this.registry.equals(registryId) && this.id.matches(entryId);
+        }
+    }
 
     /** A new (or replacement) recipe in vanilla recipe JSON format. */
     public record AddedRecipe(ResourceLocation id, JsonElement json) {

@@ -17,7 +17,8 @@ recipe tweaker, and a loot table editor that writes straight into the running se
 [Loot tables](#loot-tables) · [Item rules across tables](#item-rules-across-tables) ·
 [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) · [Loot table editor](#loot-table-editor) ·
 [Supported mods](#natively-supported-mods) · [Editor layouts](#editor-layouts--manual-override) ·
-[Commands](#commands) · [File locations](#file-locations) · [Troubleshooting](#troubleshooting) ·
+[Datapack registries](#datapack-registries) · [Commands](#commands) · [File locations](#file-locations) ·
+[Troubleshooting](#troubleshooting) ·
 [Addon API](#addon-api) · [Compatibility](#compatibility) · [Notes for developers](#notes-for-developers)
 
 ## Getting started
@@ -267,9 +268,48 @@ table — including inside `alternatives`/`group` composites — and keep each e
 functions and conditions when replacing. (Tag entries and items referenced inside functions are not
 touched.)
 
+## Datapack registries
+
+Some crafting systems are not recipes at all: Forbidden Arcanus stores its Hephaestus Forge **rituals**
+(and its enhancers, item modifiers, ...) in datapack registries, the same mechanism vanilla uses for
+enchantments. The `registries` config section rewrites those entries the way the sections above rewrite
+recipes — remove by id (`*` wildcards), merge changes into matching entries, or add whole entries:
+
+```json5
+{
+  registries: {
+    remove: [ { registry: "forbidden_arcanus:hephaestus_forge/ritual", id: "forbidden_arcanus:slimec" } ],
+    modify: [
+      // "merge" merges into the entry's JSON: objects merge deeper, everything else is
+      // replaced, null deletes a key. An entry that no longer parses loads unchanged (see the log).
+      {
+        registry: "forbidden_arcanus:hephaestus_forge/ritual",
+        id: "forbidden_arcanus:*",
+        merge: { essences: { souls: 20 } },
+      },
+    ],
+    add: [
+      // "entry" is the registry's own JSON format; an existing id is replaced.
+      { registry: "minecraft:enchantment", id: "minecraft:sharpness", entry: { /* ... */ } },
+    ],
+  },
+}
+```
+
+Two things set these rules apart from everything else in this file:
+
+- They apply while the **world loads** — restart or re-enter the world after changing them; `/reload`
+  does not touch datapack registries (that's vanilla behavior, not a DataRewriter choice).
+- **Removal can break references.** An entry that other data files name by id (an enhancer a ritual
+  requires, a magic circle) must not be removed — the world then fails to load, exactly as if a
+  datapack had deleted the file. Removing "leaf" entries like rituals themselves is safe.
+
+The generated `example.json5` documents the shapes; ritual editing also has
+[its own GUI](#hephaestus-forge-rituals-forbidden-arcanus).
+
 ## In-game editors
 
-Three screens do everything the config files do, without writing JSON. They are **client-side**: only
+These screens do everything the config files do, without writing JSON. They are **client-side**: only
 your own client needs the mod, never the other players'. Every save goes through the server, which
 validates it, appends it to a normal config file and applies it to the running game immediately.
 
@@ -278,6 +318,7 @@ validates it, appends it to a normal config file and applies it to the running g
 | `/recipeeditor` | [Recipe editor](#recipe-editor) | Build or replace one recipe, on its station's own GUI |
 | `/recipetweaker` | [Recipe tweaks](#recipe-tweaks) | Remove or swap an item across **all** recipes at once |
 | `/loottableeditor` | [Loot table editor](#loot-table-editor) | Browse and edit any loot table on the server |
+| `/recipeeditor` → Hephaestus forge ritual | [Ritual editor](#hephaestus-forge-rituals-forbidden-arcanus) | Edit Forbidden Arcanus forge rituals (with the mod installed) |
 
 Saving requires **operator level 2** on the server you're connected to. The loot editor needs it to open
 at all: loot tables are never synced to clients, so everything it shows is fetched live from the server.
@@ -447,7 +488,24 @@ automatically when that mod is installed; nothing is required at runtime.
 | Runes | `crafting` (altar GUI) | smithing-style base + addition; OR-alternatives via `#tags` |
 | Potions LD | `potion_brewing` (alchemy table GUI) | 2×2 counted ingredients (scroll to set amounts) + result; upgrade slots are machine gear, not recipe data |
 | Eternal Starlight | `alloy` (alloy furnace GUI), `drying`, `geyser_smoking`, `tool_modification`, `mana_crystal` | alloy: 3×3 ingredients, up to 3 results with amounts (result *ranges* stay JSON-only), burn time; drying rack and geyser draw the station block (the rack gets a campfire when "needs fire below" is set); geyser's input is a bare item id with its own count field; tool modification and mana crystal are the mod's crafting-table special recipes (crafting GUI, item-id slots + mana type / book tab fields). The dynamic `accessory_combination` type has no data and is hidden. |
+| Forbidden Arcanus | `clibano_combustion` (the mod's own JEI panel), `apply_modifier` | clibano: one or two ingredients (the second slot may stay empty), optional enhancer relic slot, `{"id","count"}` result, XP / cooking time / fire type (the drawn flame follows it) / residue type + chance fields; apply modifier: smithing GUI with template + addition and the modifier's id — the base slot stays empty because the recipe applies to every item the modifier accepts. Hephaestus Forge rituals get [their own editor](#hephaestus-forge-rituals-forbidden-arcanus). NeoForge-only, like the mod itself. |
+| Ars Nouveau | `enchanting_apparatus`, `enchantment`, `armor_upgrade`, `imbuement`, `glyph`, `crush`, `budding_conversion`, `scry_ritual`, `dye` | the three apparatus types and the imbuement chamber use the same pedestal ring as the mod's JEI pages (up to 8 pedestal items, `#tags` allowed); apparatus enchanting has no result item — just the enchantment id, level and source cost; glyph is a plain list of up to 9 ingredients priced in XP; crush takes up to 4 results with drop chances (Alt+scroll; the per-result `maxRange` always saves as 1, like every recipe the mod ships); budding conversion and scry ritual are two-slot recipes — scry's slots hold bare *tags* (the highlight is a BLOCK tag, so type it by hand when no item tag mirrors it); dye is a shapeless crafting recipe under its own type. `caster_tome`, `summon_ritual` and the other spell-data types stay JSON-only. NeoForge-only, like the mod itself. |
 | Create (6.x, Fabric port) | `mixing`, `compacting`, `crushing`, `milling`, `pressing`, `cutting`, `deploying`, `item_application`, `filling`, `emptying`, `splashing`, `haunting`, `sandpaper_polishing`, `mechanical_crafting` | drawn like Create's own EMI recipe views: the same slot positions, arrows and slot frames, and the animated machines (mixer, press, crushing wheels, saw, deployer, spout with its fluid stream, drain, fan, millstone, crafter, blaze burner when heat is set). Fluid ingredients/results are proper fluid slots (`#fluid tags` allowed for inputs; amounts in mB, scroll or middle-click), results take drop chances (Alt+scroll; chance slots get Create's dotted frame), basins have `Heat` (`none`/`heated`/`superheated`) and `Time (ticks)` fields, deploying/item application `Keep held item`, mechanical crafting a 9×9 grid — Create raises vanilla's 3×3 pattern cap that far, and empty rows/columns are trimmed on save, so a 2×2 recipe drawn anywhere in the grid stays 2×2 — with `Accept mirrored`. Loading a Create recipe from EMI fills item and fluid slots correctly even though Create keeps both in one list. Not covered: `sequenced_assembly` (nested step recipes — write those in JSON). |
+
+### Hephaestus forge rituals (Forbidden Arcanus)
+
+With Forbidden Arcanus installed, the recipe editor's type picker gains **Hephaestus forge ritual**,
+drawn on the mod's own JEI panel: the ring of eight pedestal slots, the main ingredient on the forge in
+the center, up to four enhancer relics on the left, the result on the right, and fields for the four
+essence costs, the forge tier (with "exact tier only"), the magic circle and the duration. A ritual
+input with `amount: 3` shows as three filled pedestals, exactly like in JEI.
+
+Rituals are **not recipes** — they live in a [datapack registry](#datapack-registries) — so this screen
+saves differently: type the ritual's id, **Load** fetches it from the server, and Save writes it as a
+`registries.add` rule to `config/datarewriter/gui-registries.json5` and applies it to the running
+server immediately. The forge picks the change up at once; other players' JEI shows it after they
+rejoin the world. Only `create_item` rituals (the ones that craft an item) are editable — loading a
+tier-upgrade ritual clears the result slot.
 
 ### Modded recipe types — automatic
 
@@ -572,6 +630,7 @@ on a connecting client. Layouts are the one client-side exception.
 | Generated, fully commented example | `config/datarewriter/example.json5` |
 | [Recipe editor](#recipe-editor) and [tweaks](#recipe-tweaks) saves | `config/datarewriter/gui-recipes.json5` |
 | [Loot table editor](#loot-table-editor) saves | `config/datarewriter/gui-loot-tables.json5` |
+| [Ritual editor](#hephaestus-forge-rituals-forbidden-arcanus) saves | `config/datarewriter/gui-registries.json5` |
 | [Editor layouts](#editor-layouts--manual-override) (**client**) | `config/datarewriter/editor-layouts/*.json5` |
 | Generated layout example (**client**) | `config/datarewriter/editor-layouts/example.json5` |
 
@@ -641,7 +700,7 @@ entrypoints — see [`API.md`](API.md).
 | **Vanilla clients** | Fully supported: rewritten recipes reach them through normal recipe sync, and the `/datarewriter` commands are server-side, so ids stay clickable-to-copy in chat. Only the editors need the mod on the client. |
 | **[EMI](https://modrinth.com/mod/emi)** | Optional, and the best companion: item and fluid side panels with drag & drop into any slot, the **fill (+)** button that loads an existing recipe into the editor, and **R**/**U** lookups over every DataRewriter screen. Nothing is required at runtime. |
 | **JEI / REI** | No integration needed — they read the synced recipe list, so added and removed recipes show up after `/datarewriter reload` (or `/reload`, or rejoining). |
-| **Mods that add recipe types** | Removal and JSON `add` always work. In the editor, vanilla and nine mods get [hand-drawn layouts](#natively-supported-mods) and everything else is [detected automatically](#modded-recipe-types--automatic); a [manual layout](#editor-layouts--manual-override) overrides either. |
+| **Mods that add recipe types** | Removal and JSON `add` always work. In the editor, vanilla and eleven mods get [hand-drawn layouts](#natively-supported-mods) and everything else is [detected automatically](#modded-recipe-types--automatic); a [manual layout](#editor-layouts--manual-override) overrides either. |
 | **Mods that inject loot at runtime** | RPG-series equipment injectors, loot-weight tweakers and anything else using the loader's loot events (Fabric `LootTableEvents`, NeoForge `LootTableLoadEvent`): their pools are shown, preserved across live edits, and covered by [item rules](#item-rules-across-tables). See [loot injected by other mods](#loot-injected-by-other-mods). NeoForge's global loot modifiers are a different mechanism — they rewrite the *rolled* drops, not the table — so the editor doesn't show them and item rules don't touch them; they still apply on top of whatever DataRewriter produced. |
 
 DataRewriter targets **1.21.1** specifically, on Fabric and NeoForge: 1.21.2+ replaced `RecipeManager`'s

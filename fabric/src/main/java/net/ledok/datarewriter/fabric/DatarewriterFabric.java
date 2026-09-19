@@ -15,6 +15,8 @@ import net.ledok.datarewriter.network.BulkRecipeEditPayload;
 import net.ledok.datarewriter.network.LootEditNetworking;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RecipeSaveNetworking;
+import net.ledok.datarewriter.network.RegistryEditNetworking;
+import net.ledok.datarewriter.network.RegistryPayloads;
 import net.ledok.datarewriter.network.SaveRecipePayload;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.inventory.MenuType;
@@ -43,6 +45,9 @@ public final class DatarewriterFabric implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(LootPayloads.TableContent.TYPE, LootPayloads.TableContent.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.SaveResult.TYPE, LootPayloads.SaveResult.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.Clipboard.TYPE, LootPayloads.Clipboard.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(RegistryPayloads.EntryRequest.TYPE, RegistryPayloads.EntryRequest.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(RegistryPayloads.SaveEntry.TYPE, RegistryPayloads.SaveEntry.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(RegistryPayloads.EntryContent.TYPE, RegistryPayloads.EntryContent.STREAM_CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(SaveRecipePayload.TYPE,
                 (payload, context) -> RecipeSaveNetworking.handleSave(context.server(), context.player(), payload));
@@ -56,6 +61,10 @@ public final class DatarewriterFabric implements ModInitializer {
                 (payload, context) -> LootEditNetworking.handleSaveTable(context.server(), context.player(), payload));
         ServerPlayNetworking.registerGlobalReceiver(LootPayloads.BulkItemEdit.TYPE,
                 (payload, context) -> LootEditNetworking.handleBulkItemEdit(context.server(), context.player(), payload));
+        ServerPlayNetworking.registerGlobalReceiver(RegistryPayloads.EntryRequest.TYPE,
+                (payload, context) -> RegistryEditNetworking.handleEntryRequest(context.server(), context.player(), payload));
+        ServerPlayNetworking.registerGlobalReceiver(RegistryPayloads.SaveEntry.TYPE,
+                (payload, context) -> RegistryEditNetworking.handleSave(context.server(), context.player(), payload));
 
         // Rules matching by output/input/type need parsed recipes and bound tags, which only exist once the
         // data reload has fully finished; the post-injection loot pass runs there too.

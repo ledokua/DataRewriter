@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import net.ledok.datarewriter.config.ConfigLoader;
 import net.ledok.datarewriter.config.GuiLootSaver;
 import net.ledok.datarewriter.config.GuiRecipeSaver;
+import net.ledok.datarewriter.config.GuiRegistrySaver;
 import net.ledok.datarewriter.config.RewriteConfig;
 import net.minecraft.resources.ResourceLocation;
 
@@ -71,6 +72,9 @@ public final class RewriteState {
         if (GuiRecipeSaver.changedSinceLastSave()) {
             externallyChangedFiles.add(GuiRecipeSaver.FILE_NAME);
         }
+        if (GuiRegistrySaver.changedSinceLastSave()) {
+            externallyChangedFiles.add(GuiRegistrySaver.FILE_NAME);
+        }
         config = ConfigLoader.load();
         loadedOnce = true;
         return config;
@@ -123,7 +127,8 @@ public final class RewriteState {
         rules.add(rule);
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
-                old.lootItemRemovals(), old.errorCount());
+                old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
+                old.registryModifications(), old.errorCount());
     }
 
     /** Same as {@link #appendLootItemReplacement} for remove_items rules. */
@@ -133,7 +138,24 @@ public final class RewriteState {
         rules.add(rule);
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
-                old.lootItemReplacements(), List.copyOf(rules), old.errorCount());
+                old.lootItemReplacements(), List.copyOf(rules), old.registryRemovals(),
+                old.registryAdditions(), old.registryModifications(), old.errorCount());
+    }
+
+    /**
+     * Mirrors a registry entry the GUI just wrote to gui-registries.json5 into the in-memory config,
+     * so it survives an in-session world reload without re-reading the file. Replaces an earlier
+     * mirror for the same registry + id.
+     */
+    public static synchronized void appendRegistryAddition(RewriteConfig.RegistryAddition rule) {
+        RewriteConfig old = config();
+        List<RewriteConfig.RegistryAddition> rules = new ArrayList<>(old.registryAdditions());
+        rules.removeIf(existing -> existing.registry().equals(rule.registry()) && existing.id().equals(rule.id()));
+        rules.add(rule);
+        config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
+                old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
+                old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(),
+                List.copyOf(rules), old.registryModifications(), old.errorCount());
     }
 
     /** Same mirroring for a recipe removal rule the GUI just saved. */
@@ -143,7 +165,8 @@ public final class RewriteState {
         rules.add(rule);
         config = new RewriteConfig(List.copyOf(rules), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
-                old.lootItemReplacements(), old.lootItemRemovals(), old.errorCount());
+                old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
+                old.registryModifications(), old.errorCount());
     }
 
     /** Same mirroring for a replace_ingredients rule the GUI just saved. */
@@ -153,7 +176,8 @@ public final class RewriteState {
         rules.add(rule);
         config = new RewriteConfig(old.removals(), old.additions(), List.copyOf(rules),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
-                old.lootItemReplacements(), old.lootItemRemovals(), old.errorCount());
+                old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
+                old.registryModifications(), old.errorCount());
     }
 
     /**
@@ -167,7 +191,10 @@ public final class RewriteState {
         boolean lootInUse = !loaded.lootRemovals().isEmpty() || !loaded.lootAdditions().isEmpty()
                 || !loaded.lootModifications().isEmpty()
                 || !loaded.lootItemReplacements().isEmpty() || !loaded.lootItemRemovals().isEmpty();
-        if (!recipesInUse && !lootInUse && loaded.errorCount() == 0 && externallyChangedFiles.isEmpty()) {
+        boolean registriesInUse = !loaded.registryRemovals().isEmpty()
+                || !loaded.registryAdditions().isEmpty() || !loaded.registryModifications().isEmpty();
+        if (!recipesInUse && !lootInUse && !registriesInUse && loaded.errorCount() == 0
+                && externallyChangedFiles.isEmpty()) {
             return; // mod not in use, stay quiet
         }
 
@@ -198,6 +225,13 @@ public final class RewriteState {
                 parts.add(lootItemsRemoved + " item entries removed");
             }
             text.append("loot tables: ").append(String.join(", ", parts));
+        }
+        if (registriesInUse) {
+            if (!text.isEmpty()) {
+                text.append("; ");
+            }
+            text.append("registry entries (applied at world load, not /reload): ")
+                    .append(RegistryRewriter.statsSummary());
         }
         if (text.isEmpty()) {
             text.append("no changes");

@@ -9,6 +9,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.ledok.datarewriter.api.DataRewriterClientAddon;
 import net.ledok.datarewriter.client.DatarewriterClient;
 import net.ledok.datarewriter.network.LootPayloads;
+import net.ledok.datarewriter.network.RegistryPayloads;
 
 public final class DatarewriterFabricClient implements ClientModInitializer {
     @Override
@@ -42,5 +43,7 @@ public final class DatarewriterFabricClient implements ClientModInitializer {
                 (payload, context) -> DatarewriterClient.onSaveResult(context.client(), payload));
         ClientPlayNetworking.registerGlobalReceiver(LootPayloads.TableContent.TYPE,
                 (payload, context) -> DatarewriterClient.onTableContent(context.client(), payload));
+        ClientPlayNetworking.registerGlobalReceiver(RegistryPayloads.EntryContent.TYPE,
+                (payload, context) -> DatarewriterClient.onRegistryEntry(context.client(), payload));
     }
 }

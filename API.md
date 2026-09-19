@@ -67,12 +67,19 @@ One builder method per config operation:
 | `modifyLootTables(idPattern, pools)` · `modifyLootTables(id, mod, pools)` | `loot_tables.modify` |
 | `replaceLootItems(from, to, tables)` | `loot_tables.replace_items` |
 | `removeLootItems(item, tables)` | `loot_tables.remove_items` |
+| `removeRegistryEntries(registry, idPattern)` | `registries.remove` |
+| `addRegistryEntry(registry, id, json)` | `registries.add` |
+| `modifyRegistryEntries(registry, idPattern, merge)` | `registries.modify` |
 
 Arguments use the config syntax: id patterns take `*` wildcards, item matches take wildcards or a
 `#tag`, `output`/`input`/`to` take an item id or `#tag`, `tables` is a scope list (`"minecraft:chests/*,
 !*:entities/*"`; `null` or `"*"` = every table). Every method validates like the config parser and throws
 `IllegalArgumentException` on bad input — a provider that throws contributes **nothing** for that load and
 counts as one config error (`/datarewriter errors` shows the message), exactly like a broken file.
+
+The registry methods edit **datapack registries** (Forbidden Arcanus rituals, enchantments, ...);
+they apply while the world loads, never on `/reload` — see the README's
+[Datapack registries](README.md#datapack-registries) for the semantics and the removal caveat.
 
 Providers run after the config files, so on the same id an `add` from a file wins over yours, the way a
 later file wins over an earlier one. Rules that need parsed recipes or bound tags (`output`, `input`,

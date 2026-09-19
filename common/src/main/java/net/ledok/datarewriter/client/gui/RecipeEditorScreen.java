@@ -3,9 +3,11 @@ package net.ledok.datarewriter.client.gui;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.JsonOps;
 import net.ledok.datarewriter.platform.Network;
+import net.ledok.datarewriter.network.RegistryPayloads;
 import net.ledok.datarewriter.network.SaveRecipePayload;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -268,7 +270,12 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         invTop = Math.max(top, (height - INV_ROWS * 18) / 2);
 
         int y = panelTop + layout.height + 6;
-        addRenderableWidget(idBox(left, y, contentW));
+        if (layout.registryTarget != null) {
+            addRenderableWidget(idBox(left, y, contentW - 44));
+            addRenderableWidget(loadEntryButton(left + contentW - 40, y, 40));
+        } else {
+            addRenderableWidget(idBox(left, y, contentW));
+        }
         y += 22;
 
         for (List<FieldDef> row : fieldRows) {
@@ -318,7 +325,12 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
 
         int colX = panelLeft + layout.width + 8;
         int y = panelTop;
-        addRenderableWidget(idBox(colX, y, colW));
+        if (layout.registryTarget != null) {
+            addRenderableWidget(idBox(colX, y, colW - 44));
+            addRenderableWidget(loadEntryButton(colX + colW - 40, y, 40));
+        } else {
+            addRenderableWidget(idBox(colX, y, colW));
+        }
         y += 22;
 
         for (FieldDef field : layout.fields) {
@@ -958,6 +970,23 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             status = Component.literal(e.getMessage()).withStyle(ChatFormatting.RED);
             return;
         }
+        if (layout.registryTarget != null) {
+            String entryId = idText.trim();
+            if (ResourceLocation.tryParse(entryId) == null || entryId.isEmpty()) {
+                status = Component.literal("Give the entry an id first (like mypack:my_ritual).")
+                        .withStyle(ChatFormatting.RED);
+                return;
+            }
+            if (!Network.INSTANCE.canSendToServer(RegistryPayloads.SaveEntry.TYPE)) {
+                status = Component.literal("This server doesn't run DataRewriter — nothing saved.")
+                        .withStyle(ChatFormatting.RED);
+                return;
+            }
+            Network.INSTANCE.sendToServer(new RegistryPayloads.SaveEntry(
+                    layout.registryTarget, entryId, recipe.toString()));
+            status = Component.literal("Sent — waiting for the server…").withStyle(ChatFormatting.YELLOW);
+            return;
+        }
         if (!Network.INSTANCE.canSendToServer(SaveRecipePayload.TYPE)) {
             status = Component.literal("This server doesn't run DataRewriter — recipe not saved.")
                     .withStyle(ChatFormatting.RED);
@@ -987,13 +1016,15 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
 
     private JsonObject buildRecipe() {
         JsonObject recipe = layout.template != null ? layout.template.deepCopy() : new JsonObject();
-        recipe.addProperty("type", layout.typeId);
-        String id = idText.trim();
-        if (!id.isEmpty()) {
-            if (ResourceLocation.tryParse(id) == null) {
-                throw new EditorError("'" + id + "' is not a valid recipe id");
+        if (layout.registryTarget == null) {
+            recipe.addProperty("type", layout.typeId);
+            String id = idText.trim();
+            if (!id.isEmpty()) {
+                if (ResourceLocation.tryParse(id) == null) {
+                    throw new EditorError("'" + id + "' is not a valid recipe id");
+                }
+                recipe.addProperty("id", id);
             }
-            recipe.addProperty("id", id);
         }
 
         String[] refs = refs();
@@ -1056,7 +1087,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             };
             setAtPath(recipe, field.path(), value);
         }
-        return recipe;
+        return layout.finishSave != null ? layout.finishSave.apply(recipe) : recipe;
     }
 
     private void buildShaped(JsonObject recipe, String[] refs) {
@@ -1220,7 +1251,20 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         lastTypeId = typeId;
         clearSlots();
         FIELDS_BY_TYPE.remove(typeId);
+        if (layout.prepareLoad != null) {
+            json = layout.prepareLoad.apply(json);
+        }
+        fillFromJson(json);
 
+        idText = holder.id().toString();
+        status = Component.literal("Loaded " + holder.id() + " — save to replace it.")
+                .withStyle(ChatFormatting.GREEN);
+        rebuildWidgets();
+        return true;
+    }
+
+    /** Fills slots and fields from a recipe/entry in its serialized JSON form (layout already selected). */
+    private void fillFromJson(JsonObject json) {
         String[] refs = refs();
         int[] counts = counts();
         int[] chances = chances();
@@ -1274,12 +1318,56 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 values.put(field.path(), p.getAsString());
             }
         }
+    }
 
-        idText = holder.id().toString();
-        status = Component.literal("Loaded " + holder.id() + " — save to replace it.")
+    /** The Load button of registry layouts: asks the server for the entry named in the id box. */
+    private Button loadEntryButton(int x, int y, int width) {
+        return Button.builder(Component.literal("Load"), b -> {
+            String entryId = idText.trim();
+            if (ResourceLocation.tryParse(entryId) == null || entryId.isEmpty()) {
+                status = Component.literal("Type the entry's id first (like forbidden_arcanus:boss_catcher).")
+                        .withStyle(ChatFormatting.RED);
+                return;
+            }
+            if (!Network.INSTANCE.canSendToServer(RegistryPayloads.EntryRequest.TYPE)) {
+                status = Component.literal("This server doesn't run DataRewriter.")
+                        .withStyle(ChatFormatting.RED);
+                return;
+            }
+            Network.INSTANCE.sendToServer(new RegistryPayloads.EntryRequest(layout.registryTarget, entryId));
+            status = Component.literal("Loading " + entryId + "…").withStyle(ChatFormatting.YELLOW);
+        }).bounds(x, y, width, 20).build();
+    }
+
+    /** The server's answer to {@link #loadEntryButton}: the entry's JSON, or "" when it doesn't exist. */
+    public void onRegistryEntry(String registry, String entryId, String json) {
+        if (layout.registryTarget == null || !layout.registryTarget.equals(registry)) {
+            return;
+        }
+        if (json.isEmpty()) {
+            status = Component.literal("No entry '" + entryId + "' in " + registry + " on this server.")
+                    .withStyle(ChatFormatting.RED);
+            return;
+        }
+        JsonObject parsed;
+        try {
+            parsed = JsonParser.parseString(json) instanceof JsonObject obj ? obj : null;
+        } catch (Exception e) {
+            parsed = null;
+        }
+        if (parsed == null) {
+            status = Component.literal("The server sent an unreadable entry.").withStyle(ChatFormatting.RED);
+            return;
+        }
+        clearSlots();
+        if (layout.prepareLoad != null) {
+            parsed = layout.prepareLoad.apply(parsed);
+        }
+        fillFromJson(parsed);
+        idText = entryId;
+        status = Component.literal("Loaded " + entryId + " — save to replace it.")
                 .withStyle(ChatFormatting.GREEN);
         rebuildWidgets();
-        return true;
     }
 
     /** Fills the crafting grid from an already-parsed shaped recipe (no JSON round-trip). */
@@ -1454,6 +1542,15 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             ref = tag.startsWith("#") ? tag : "#" + tag;
         } else if (obj.get("item") instanceof JsonObject inner) {
             Parsed nested = parseAny(inner);
+            if (nested != null) {
+                ref = nested.ref();
+                if (count == 0) {
+                    count = nested.count();
+                }
+            }
+        } else if (obj.get("stack") instanceof JsonObject stack) {
+            // Ars Nouveau's crush output: {"stack": {"id", "count"}, "chance", "maxRange"}.
+            Parsed nested = parseAny(stack);
             if (nested != null) {
                 ref = nested.ref();
                 if (count == 0) {

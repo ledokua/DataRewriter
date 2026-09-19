@@ -150,6 +150,25 @@ public final class EditorLayout {
     /** Extra art (see {@link Decoration}); null = none. */
     public Decoration decoration;
     /**
+     * Bundled layouts only: rewrites the built recipe JSON as the last step of
+     * a save — for shapes slots can't express directly, e.g. collapsing an
+     * either-or key that holds one ingredient OR a {first, second} pair. Null = none.
+     */
+    public java.util.function.UnaryOperator<JsonObject> finishSave;
+    /**
+     * Bundled layouts only: the inverse of {@link #finishSave} — rewrites an
+     * encoded recipe before its values are read into the editor's slots and
+     * fields (EMI's fill button, the screenshot harness). Null = none.
+     */
+    public java.util.function.UnaryOperator<JsonObject> prepareLoad;
+    /**
+     * Bundled layouts only: when set, the layout edits entries of this datapack registry (a Hephaestus
+     * Forge ritual, say) instead of recipes — saves go through the registry save payload, the built
+     * JSON carries no "type"/"id" keys, and an id is mandatory (it names the entry). {@link #typeId}
+     * is then just the layout's unique identifier. Null = a normal recipe layout.
+     */
+    public String registryTarget;
+    /**
      * True when the decoration draws its own slot frames, so the editor
      * skips its generic grey slot boxes and result arrow (texture-less
      * layouts only).

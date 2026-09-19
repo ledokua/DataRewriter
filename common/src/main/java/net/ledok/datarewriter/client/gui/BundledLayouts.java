@@ -67,6 +67,8 @@ final class BundledLayouts {
         }
         layouts.addAll(CreateLayouts.forInstalledTypes());
         layouts.addAll(EternalStarlightLayouts.forInstalledTypes());
+        layouts.addAll(ForbiddenArcanusLayouts.forInstalledTypes());
+        layouts.addAll(ArsNouveauLayouts.forInstalledTypes());
         return layouts;
     }
 

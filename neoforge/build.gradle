@@ -3,6 +3,11 @@ plugins {
     id 'net.neoforged.moddev'
 }
 
+repositories {
+    maven { name = "TerraformersMC"; url = "https://maven.terraformersmc.com/releases/" }
+    maven { name = "Modrinth"; url = "https://api.modrinth.com/maven"; content { includeGroup "maven.modrinth" } }
+}
+
 base {
     archivesName = "${rootProject.archives_base_name}-neoforge"
 }
@@ -43,6 +48,15 @@ neoForge {
 
 dependencies {
     compileOnly project(path: ':common', configuration: 'namedElements')
+    // Dev runtime only, so the EMI integration can be tested in :neoforge:runClient (FML finds mod jars on
+    // the runtime classpath). Nothing of it ends up in the release jar.
+    runtimeOnly "dev.emi:emi-neoforge:${rootProject.emi_version}"
+    // Bundled-layout targets for dev runs, same deal: hand-checking the Forbidden Arcanus and Ars Nouveau layouts.
+    runtimeOnly("maven.modrinth:forbidden-arcanus:2.6.1") { transitive = false }
+    runtimeOnly("maven.modrinth:valhelsia-core:1.1.4") { transitive = false }
+    runtimeOnly("maven.modrinth:ars-nouveau:5.13.1") { transitive = false }
+    runtimeOnly("maven.modrinth:curios:9.5.1+1.21.1") { transitive = false }
+    runtimeOnly("maven.modrinth:geckolib:Grwn5rUB") { transitive = false }
 }
 
 processResources {

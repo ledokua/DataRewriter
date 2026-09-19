@@ -49,7 +49,7 @@ public final class ConfigLoader {
             error("Could not create config directory {}: {}", dir, e.getMessage());
             lastIssues = List.copyOf(issues);
             return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), 1);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
         }
 
         List<RewriteConfig.RemovalRule> removals = new ArrayList<>();
@@ -60,6 +60,9 @@ public final class ConfigLoader {
         List<RewriteConfig.LootModification> lootModifications = new ArrayList<>();
         List<RewriteConfig.LootItemReplacement> lootItemReplacements = new ArrayList<>();
         List<RewriteConfig.LootItemRemoval> lootItemRemovals = new ArrayList<>();
+        List<RewriteConfig.RegistryRemoval> registryRemovals = new ArrayList<>();
+        List<RewriteConfig.RegistryAddition> registryAdditions = new ArrayList<>();
+        List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
 
         // editor-layouts/ holds the recipe editor's CLIENT-side layout files,
         // which are not rewrite rules.
@@ -79,14 +82,19 @@ public final class ConfigLoader {
                 int recipeBefore = removals.size() + additions.size() + ingredientReplacements.size();
                 int lootBefore = lootRemovals.size() + lootAdditions.size() + lootModifications.size()
                         + lootItemReplacements.size() + lootItemRemovals.size();
+                int registryBefore = registryRemovals.size() + registryAdditions.size()
+                        + registryModifications.size();
                 String name = dir.relativize(file).toString().replace('\\', '/');
                 loadFile(name, file,
                         removals, additions, ingredientReplacements, lootRemovals,
-                        lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals);
+                        lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals,
+                        registryRemovals, registryAdditions, registryModifications);
                 summaries.add(new FileSummary(name,
                         removals.size() + additions.size() + ingredientReplacements.size() - recipeBefore,
                         lootRemovals.size() + lootAdditions.size() + lootModifications.size()
-                                + lootItemReplacements.size() + lootItemRemovals.size() - lootBefore));
+                                + lootItemReplacements.size() + lootItemRemovals.size() - lootBefore,
+                        registryRemovals.size() + registryAdditions.size()
+                                + registryModifications.size() - registryBefore));
             }
             // Rules contributed from code (addon API) come after the files, so on the same id a file
             // wins, like a later file does over an earlier one.
@@ -108,10 +116,15 @@ public final class ConfigLoader {
                 lootModifications.addAll(part.lootModifications());
                 lootItemReplacements.addAll(part.lootItemReplacements());
                 lootItemRemovals.addAll(part.lootItemRemovals());
+                registryRemovals.addAll(part.registryRemovals());
+                registryAdditions.addAll(part.registryAdditions());
+                registryModifications.addAll(part.registryModifications());
                 summaries.add(new FileSummary(name,
                         part.removals().size() + part.additions().size() + part.ingredientReplacements().size(),
                         part.lootRemovals().size() + part.lootAdditions().size() + part.lootModifications().size()
-                                + part.lootItemReplacements().size() + part.lootItemRemovals().size()));
+                                + part.lootItemReplacements().size() + part.lootItemRemovals().size(),
+                        part.registryRemovals().size() + part.registryAdditions().size()
+                                + part.registryModifications().size()));
             }
             lastFiles = List.copyOf(summaries);
             lastDir = dir.toAbsolutePath().toString();
@@ -126,14 +139,21 @@ public final class ConfigLoader {
                 List.copyOf(ingredientReplacements),
                 List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                 List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
+                List.copyOf(registryRemovals), List.copyOf(registryAdditions),
+                List.copyOf(registryModifications),
                 errors);
     }
 
     /** One config file of the last load and how many rules it contributed. */
-    public record FileSummary(String name, int recipeRules, int lootRules) {
+    public record FileSummary(String name, int recipeRules, int lootRules, int registryRules) {
+        public FileSummary(String name, int recipeRules, int lootRules) {
+            this(name, recipeRules, lootRules, 0);
+        }
+
         @Override
         public String toString() {
-            return name + " (" + recipeRules + " recipe, " + lootRules + " loot rules)";
+            return name + " (" + recipeRules + " recipe, " + lootRules + " loot"
+                    + (registryRules > 0 ? ", " + registryRules + " registry" : "") + " rules)";
         }
     }
 
@@ -174,7 +194,10 @@ public final class ConfigLoader {
                                  List<RewriteConfig.AddedLootTable> lootAdditions,
                                  List<RewriteConfig.LootModification> lootModifications,
                                  List<RewriteConfig.LootItemReplacement> lootItemReplacements,
-                                 List<RewriteConfig.LootItemRemoval> lootItemRemovals) {
+                                 List<RewriteConfig.LootItemRemoval> lootItemRemovals,
+                                 List<RewriteConfig.RegistryRemoval> registryRemovals,
+                                 List<RewriteConfig.RegistryAddition> registryAdditions,
+                                 List<RewriteConfig.RegistryModification> registryModifications) {
         JsonObject root;
         try {
             String content = stripCommentsAndTrailingCommas(Files.readString(file));
@@ -207,13 +230,98 @@ public final class ConfigLoader {
             }
         }
 
+        if (root.has("registries")) {
+            if (root.get("registries") instanceof JsonObject registries) {
+                readRegistriesSection(registries, fileName, registryRemovals, registryAdditions,
+                        registryModifications);
+            } else {
+                error("[{}] 'registries' must be an object with 'remove', 'modify' and/or 'add' lists",
+                        fileName);
+            }
+        }
+
         for (String key : root.keySet()) {
             if (key.equals("remove") || key.equals("add")) {
                 error("[{}] '{}' must be inside a 'recipes: { ... }' section, ignoring it", fileName, key);
-            } else if (!key.equals("recipes") && !key.equals("loot_tables")) {
-                warn("[{}] Unknown section '{}' (expected 'recipes' or 'loot_tables')",
+            } else if (!key.equals("recipes") && !key.equals("loot_tables") && !key.equals("registries")) {
+                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables' or 'registries')",
                         fileName, key);
             }
+        }
+    }
+
+    /**
+     * registries: { remove: [{registry, id}], modify: [{registry, id, merge: {...}}],
+     * add: [{registry, id, entry: {...}}] } — entries of ANY datapack registry (Forbidden Arcanus
+     * rituals, enchantments, ...). Applied while the world's registries load, never on /reload.
+     */
+    private static void readRegistriesSection(JsonObject registries, String fileName,
+                                              List<RewriteConfig.RegistryRemoval> removals,
+                                              List<RewriteConfig.RegistryAddition> additions,
+                                              List<RewriteConfig.RegistryModification> modifications) {
+        readRegistryList(registries, "remove", fileName, (entry, index, registry) -> {
+            IdPattern id = readIdPattern(entry, "id", fileName, index);
+            if (id == null) {
+                error("[{}] registries remove[{}] needs 'id' (an entry id, '*' wildcards allowed)",
+                        fileName, index);
+                return;
+            }
+            removals.add(new RewriteConfig.RegistryRemoval(registry, id, fileName));
+        });
+        readRegistryList(registries, "modify", fileName, (entry, index, registry) -> {
+            IdPattern id = readIdPattern(entry, "id", fileName, index);
+            if (id == null || !(entry.get("merge") instanceof JsonObject merge)) {
+                error("[{}] registries modify[{}] needs 'id' ('*' wildcards allowed) and a 'merge' object",
+                        fileName, index);
+                return;
+            }
+            modifications.add(new RewriteConfig.RegistryModification(registry, id, merge.deepCopy(), fileName));
+        });
+        readRegistryList(registries, "add", fileName, (entry, index, registry) -> {
+            ResourceLocation id = readId(entry, "id", fileName, index);
+            if (id == null || !(entry.get("entry") instanceof JsonObject content)) {
+                error("[{}] registries add[{}] needs 'id' (an exact entry id) and an 'entry' object "
+                        + "in the registry's own JSON format", fileName, index);
+                return;
+            }
+            additions.add(new RewriteConfig.RegistryAddition(registry, id, content.deepCopy(), fileName));
+        });
+        for (String key : registries.keySet()) {
+            if (!key.equals("remove") && !key.equals("modify") && !key.equals("add")) {
+                warn("[{}] registries: unknown key '{}' (expected 'remove', 'modify' or 'add')",
+                        fileName, key);
+            }
+        }
+    }
+
+    private interface RegistryRuleReader {
+        void read(JsonObject entry, int index, ResourceLocation registry);
+    }
+
+    private static void readRegistryList(JsonObject registries, String listName, String fileName,
+                                         RegistryRuleReader reader) {
+        if (!registries.has(listName)) {
+            return;
+        }
+        if (!(registries.get(listName) instanceof JsonArray list)) {
+            error("[{}] registries '{}' must be a list", fileName, listName);
+            return;
+        }
+        int index = 0;
+        for (JsonElement element : list) {
+            if (!(element instanceof JsonObject entry)) {
+                error("[{}] registries {}[{}] must be an object", fileName, listName, index);
+                index++;
+                continue;
+            }
+            ResourceLocation registry = readId(entry, "registry", fileName, index);
+            if (registry == null) {
+                error("[{}] registries {}[{}] needs 'registry' (the registry's id, e.g. "
+                        + "\"forbidden_arcanus:hephaestus_forge/ritual\")", fileName, listName, index);
+            } else {
+                reader.read(entry, index, registry);
+            }
+            index++;
         }
     }
 
@@ -876,5 +984,51 @@ public final class ConfigLoader {
                 ],
               },
             }
+
+            // ---- Datapack registries (advanced) --------------------------------------
+            // Entries of ANY datapack registry — Forbidden Arcanus rituals, enchantments,
+            // enhancer definitions, ... — removed, tweaked or added, KubeJS-style.
+            // Unlike everything above, these apply while the WORLD LOADS: restart or
+            // re-enter the world after changing them (/reload does not touch them).
+            //
+            // "registry" is the registry's id; the data folder it loads from is
+            // data/<namespace>/<registry namespace>/<registry path>/. Examples:
+            //   forbidden_arcanus:hephaestus_forge/ritual
+            //   minecraft:enchantment
+            //
+            // registries: {
+            //   remove: [
+            //     // '*' wildcards allowed in "id". CAREFUL: an entry other data files
+            //     // reference by id must not be removed — world loading then fails,
+            //     // exactly as if a datapack had deleted the file.
+            //     { registry: "forbidden_arcanus:hephaestus_forge/ritual", id: "forbidden_arcanus:slimec" },
+            //   ],
+            //   modify: [
+            //     // "merge" is merged into every matching entry: objects merge deeper,
+            //     // everything else is replaced, null deletes a key. An entry that no
+            //     // longer parses afterwards loads unchanged (see the log).
+            //     {
+            //       registry: "forbidden_arcanus:hephaestus_forge/ritual",
+            //       id: "forbidden_arcanus:*",
+            //       merge: { essences: { souls: 20 } },
+            //     },
+            //   ],
+            //   add: [
+            //     // "entry" is the registry's own JSON format — an existing id is
+            //     // replaced, a new one is added.
+            //     {
+            //       registry: "forbidden_arcanus:hephaestus_forge/ritual",
+            //       id: "mypack:my_ritual",
+            //       entry: {
+            //         inputs: [{ ingredient: { item: "minecraft:diamond" }, amount: 2 }],
+            //         main_ingredient: { item: "minecraft:stick" },
+            //         result: { type: "forbidden_arcanus:create_item", result_item: { id: "minecraft:netherite_sword", count: 1 } },
+            //         essences: { aureal: 100 },
+            //         forge_tier: 1,
+            //         magic_circle: "forbidden_arcanus:create_item",
+            //       },
+            //     },
+            //   ],
+            // },
             """;
 }

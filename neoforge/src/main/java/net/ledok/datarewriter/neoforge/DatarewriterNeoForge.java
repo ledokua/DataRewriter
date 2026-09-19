@@ -10,6 +10,8 @@ import net.ledok.datarewriter.network.BulkRecipeEditPayload;
 import net.ledok.datarewriter.network.LootEditNetworking;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RecipeSaveNetworking;
+import net.ledok.datarewriter.network.RegistryEditNetworking;
+import net.ledok.datarewriter.network.RegistryPayloads;
 import net.ledok.datarewriter.network.SaveRecipePayload;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
@@ -76,6 +78,12 @@ public final class DatarewriterNeoForge {
         r.playToClient(LootPayloads.TableContent.TYPE, LootPayloads.TableContent.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.tableContent(p));
         r.playToClient(LootPayloads.SaveResult.TYPE, LootPayloads.SaveResult.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.saveResult(p));
         r.playToClient(LootPayloads.Clipboard.TYPE, LootPayloads.Clipboard.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.clipboard(p));
+        r.playToServer(RegistryPayloads.EntryRequest.TYPE, RegistryPayloads.EntryRequest.STREAM_CODEC,
+                (p, ctx) -> RegistryEditNetworking.handleEntryRequest(server(ctx), player(ctx), p));
+        r.playToServer(RegistryPayloads.SaveEntry.TYPE, RegistryPayloads.SaveEntry.STREAM_CODEC,
+                (p, ctx) -> RegistryEditNetworking.handleSave(server(ctx), player(ctx), p));
+        r.playToClient(RegistryPayloads.EntryContent.TYPE, RegistryPayloads.EntryContent.STREAM_CODEC,
+                (p, ctx) -> NeoForgeClientPayloads.registryEntry(p));
     }
 
     private static ServerPlayer player(IPayloadContext ctx) {
