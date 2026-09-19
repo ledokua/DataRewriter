@@ -71,6 +71,7 @@ final class BundledLayouts {
         layouts.addAll(ArsNouveauLayouts.forInstalledTypes());
         layouts.addAll(MysticalAgricultureLayouts.forInstalledTypes());
         layouts.addAll(EidolonLayouts.forInstalledTypes());
+        layouts.addAll(MalumLayouts.forInstalledTypes());
         return layouts;
     }
 

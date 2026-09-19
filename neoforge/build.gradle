@@ -60,6 +60,8 @@ dependencies {
     runtimeOnly("maven.modrinth:mystical-agriculture:PLakgT6X") { transitive = false }
     runtimeOnly("maven.modrinth:cucumber:8421rqFF") { transitive = false }
     runtimeOnly("maven.modrinth:eidolonrepraised:e82la8yu") { transitive = false }
+    runtimeOnly("maven.modrinth:malum:BIbVs1fo") { transitive = false }
+    runtimeOnly("maven.modrinth:lodestonelib:CohX6yP1") { transitive = false }
 }
 
 processResources {

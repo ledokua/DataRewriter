@@ -46,7 +46,10 @@ public final class EditorLayouts {
             "mysticalagriculture:soul_jar_empty",
             // Chants are sequences of sign ids, nothing an item-slot editor can express.
             "eidolon_repraised:chant",
-            "eidolon_repraised:command_chant"
+            "eidolon_repraised:command_chant",
+            // Block-state growth and world-gen rule data, nothing an item editor can express.
+            "malum:conjuncture_crystallarium",
+            "malum:ore_derealization"
     );
 
     /**
