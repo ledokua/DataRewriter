@@ -70,6 +70,7 @@ final class BundledLayouts {
         layouts.addAll(ForbiddenArcanusLayouts.forInstalledTypes());
         layouts.addAll(ArsNouveauLayouts.forInstalledTypes());
         layouts.addAll(MysticalAgricultureLayouts.forInstalledTypes());
+        layouts.addAll(EidolonLayouts.forInstalledTypes());
         return layouts;
     }
 

@@ -43,7 +43,10 @@ public final class EditorLayouts {
             "eternal_starlight:accessory_combination", // dynamic special crafting recipe, no data
             // Special crafting behaviors with dynamic ingredient types (all_hoes / a filled soul jar).
             "mysticalagriculture:farmland_till",
-            "mysticalagriculture:soul_jar_empty"
+            "mysticalagriculture:soul_jar_empty",
+            // Chants are sequences of sign ids, nothing an item-slot editor can express.
+            "eidolon_repraised:chant",
+            "eidolon_repraised:command_chant"
     );
 
     /**

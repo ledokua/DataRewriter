@@ -59,6 +59,7 @@ dependencies {
     runtimeOnly("maven.modrinth:geckolib:Grwn5rUB") { transitive = false }
     runtimeOnly("maven.modrinth:mystical-agriculture:PLakgT6X") { transitive = false }
     runtimeOnly("maven.modrinth:cucumber:8421rqFF") { transitive = false }
+    runtimeOnly("maven.modrinth:eidolonrepraised:e82la8yu") { transitive = false }
 }
 
 processResources {

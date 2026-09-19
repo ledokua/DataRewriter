@@ -1037,7 +1037,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
         for (int i = 0; i < layout.slots.size(); i++) {
             SlotDef slot = layout.slots.get(i);
-            if (layout.kind != Kind.SLOTS && !slot.result()) {
+            if (layout.kind != Kind.SLOTS && !slot.result() && i < layout.gridSize * layout.gridSize) {
                 continue; // grid inputs were turned into pattern/key or ingredients above
             }
             String ref = refs[i];
@@ -1279,8 +1279,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         Set<String> consumed = new HashSet<>();
         for (int i = 0; i < layout.slots.size(); i++) {
             SlotDef slot = layout.slots.get(i);
-            if (layout.kind != Kind.SLOTS && !slot.result()) {
-                continue;
+            if (layout.kind != Kind.SLOTS && !slot.result() && i < layout.gridSize * layout.gridSize) {
+                continue; // grid slots were read by loadShaped/loadShapeless
             }
             boolean array = slot.path().endsWith("[]");
             if (!array && consumed.contains(slot.path())) {
