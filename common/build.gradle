@@ -1,0 +1,31 @@
+// Loader-agnostic code. Only vanilla Minecraft (Mojmap) and, behind the "emi" entrypoint / @EmiEntrypoint,
+// EMI's loader-neutral API may be referenced here; loader glue lives in ../fabric and ../neoforge.
+plugins {
+    id 'fabric-loom'
+}
+
+repositories {
+    maven { name = "TerraformersMC"; url = "https://maven.terraformersmc.com/releases/" }
+}
+
+base {
+    archivesName = "${rootProject.archives_base_name}-common"
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${rootProject.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modCompileOnly "net.fabricmc:fabric-loader:${rootProject.loader_version}"
+
+    // Optional EMI integration (side panels, drag & drop, fill button, R/U lookups). Compile-only: the
+    // plugin class is loaded solely by EMI itself (Fabric "emi" entrypoint / NeoForge @EmiEntrypoint scan),
+    // so nothing breaks when EMI is not installed. The api jar is the same on both loaders.
+    modCompileOnly("dev.emi:emi-fabric:${rootProject.emi_version}:api") { transitive = false }
+}
+
+loom {
+    runs {
+        client { ideConfigGenerated = false }
+        server { ideConfigGenerated = false }
+    }
+}

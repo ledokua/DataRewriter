@@ -1,0 +1,35 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "datarewriter"
+version = "${version}"
+displayName = "DataRewriter"
+authors = "LeDok"
+description = '''Recipe and loot table rewriting through config files and in-game editors.'''
+
+[[mixins]]
+config = "datarewriter.mixins.json"
+
+[[dependencies.datarewriter]]
+modId = "neoforge"
+type = "required"
+versionRange = "[${neoforge_version},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.datarewriter]]
+modId = "minecraft"
+type = "required"
+versionRange = "[${minecraft_version}]"
+ordering = "NONE"
+side = "BOTH"
+
+# EMI adds side panels, drag & drop and the fill button to the editors when present.
+[[dependencies.datarewriter]]
+modId = "emi"
+type = "optional"
+versionRange = "[0,)"
+ordering = "NONE"
+side = "CLIENT"

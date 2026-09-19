@@ -1,0 +1,68 @@
+// NeoForge glue: @Mod entrypoints, payload/lifecycle event bridging, menu registration.
+plugins {
+    id 'net.neoforged.moddev'
+}
+
+base {
+    archivesName = "${rootProject.archives_base_name}-neoforge"
+}
+
+def commonSourceSet = project(':common').sourceSets.main
+
+neoForge {
+    version = rootProject.neoforge_version
+
+    runs {
+        client {
+            client()
+            gameDirectory = project.file('run')
+            // Screenshot harness, same properties as :fabric:runClient (see fabric/build.gradle). ModDevGradle
+            // runs ignore Gradle's --args, so the world comes from -PquickPlay=<world> here.
+            ["screenshotTypes", "screenshotSample"].each { name ->
+                if (project.hasProperty(name)) {
+                    systemProperty("datarewriter.$name", project.property(name).toString())
+                }
+            }
+            if (project.hasProperty("quickPlay")) {
+                programArguments.addAll("--quickPlaySingleplayer", project.property("quickPlay").toString())
+            }
+        }
+        server {
+            server()
+            gameDirectory = project.file('run-server')
+        }
+    }
+
+    mods {
+        datarewriter {
+            sourceSet sourceSets.main
+            sourceSet commonSourceSet
+        }
+    }
+}
+
+dependencies {
+    compileOnly project(path: ':common', configuration: 'namedElements')
+}
+
+processResources {
+    from commonSourceSet.resources
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", rootProject.minecraft_version
+    inputs.property "neoforge_version", rootProject.neoforge_version
+    filteringCharset "UTF-8"
+    filesMatching("META-INF/neoforge.mods.toml") {
+        expand "version": project.version,
+                "minecraft_version": rootProject.minecraft_version,
+                "neoforge_version": rootProject.neoforge_version
+    }
+}
+
+jar {
+    from commonSourceSet.output.classesDirs
+    from(rootProject.file("LICENSE.txt")) { rename { "${it}_${rootProject.archives_base_name}" } }
+}
+
+sourcesJar {
+    from commonSourceSet.allSource
+}

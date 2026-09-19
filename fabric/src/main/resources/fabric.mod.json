@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "datarewriter",
+  "version": "${version}",
+  "name": "DataRewriter",
+  "description": "Recipe and loot table rewriting through config files and in-game editors.",
+  "authors": [
+    "LeDok"
+  ],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "net.ledok.datarewriter.fabric.DatarewriterFabric"
+    ],
+    "client": [
+      "net.ledok.datarewriter.fabric.client.DatarewriterFabricClient"
+    ],
+    "emi": [
+      "net.ledok.datarewriter.client.emi.DataRewriterEmiPlugin"
+    ]
+  },
+  "mixins": [
+    "datarewriter.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}",
+    "java": ">=21"
+  },
+  "suggests": {
+    "emi": "*"
+  }
+}
