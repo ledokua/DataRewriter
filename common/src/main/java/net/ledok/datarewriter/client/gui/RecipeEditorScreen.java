@@ -63,6 +63,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     private static final Map<String, String[]> REFS_BY_TYPE = new HashMap<>();
     private static final Map<String, int[]> COUNTS_BY_TYPE = new HashMap<>();
     private static final Map<String, int[]> CHANCES_BY_TYPE = new HashMap<>();
+    /** Raw components JSON per result slot (null = none), keyed like the other slot state. */
+    private static final Map<String, String[]> COMPONENTS_BY_TYPE = new HashMap<>();
     private static final Map<String, Map<String, String>> FIELDS_BY_TYPE = new HashMap<>();
     private static String lastTypeId = "";
 
@@ -223,6 +225,25 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             CHANCES_BY_TYPE.put(layout.typeId, chances);
         }
         return chances;
+    }
+
+    /** Components JSON text per slot, for slots where {@link #supportsComponents} is true. */
+    private String[] components() {
+        String[] components = COMPONENTS_BY_TYPE.get(layout.typeId);
+        if (components == null || components.length != layout.slots.size()) {
+            components = new String[layout.slots.size()];
+            COMPONENTS_BY_TYPE.put(layout.typeId, components);
+        }
+        return components;
+    }
+
+    /**
+     * Result slots writing a plain item stack can carry a {@code components} object; ingredient
+     * slots can't (1.21.1 ingredients are item/tag only), and custom builders shape their own JSON.
+     */
+    private static boolean supportsComponents(SlotDef slot) {
+        return slot.result() && slot.custom() == null
+                && (slot.format() == SlotFormat.ITEM || slot.format() == SlotFormat.SHORTHAND_RESULT);
     }
 
     private Map<String, String> fieldValues() {
@@ -510,6 +531,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
             if (refs[i] != null) {
                 ItemStack icon = iconFor(refs[i], slot.format().fluid());
+                if (components()[i] != null && supportsComponents(slot)) {
+                    icon = componentIcon(i, icon);
+                }
                 graphics.renderItem(icon, x, y);
                 String decoration = decorationFor(slot, refs[i], counts[i], chances()[i]);
                 if (decoration != null) {
@@ -714,6 +738,13 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 lines.add(Component.literal("Middle-click: convert to one of its #tags")
                         .withStyle(ChatFormatting.GRAY));
             }
+            if (supportsComponents(slot)) {
+                lines.add(Component.literal(components()[index] != null
+                        ? "Has custom components — middle-click to edit"
+                        : "Middle-click: add data components (name, enchantments, ...)")
+                        .withStyle(components()[index] != null
+                                ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.GRAY));
+            }
             lines.add(Component.literal("Right-click to clear").withStyle(ChatFormatting.GRAY));
         }
         if (slot.format().counted && layout.kind == Kind.SLOTS) {
@@ -798,21 +829,32 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                             iconFor(refs()[slotIndex], false).getItem(),
                             tag -> refs()[slotIndex] = tag))
                     : null;
+            Runnable editComponents = supportsComponents(slot)
+                    ? () -> minecraft.setScreen(new ComponentsEditScreen(this, refs()[slotIndex],
+                            components()[slotIndex], obj -> {
+                        components()[slotIndex] = obj == null ? null : obj.toString();
+                        componentIconCache.remove(slotIndex);
+                    }))
+                    : null;
             if (countEditable) {
-                // Middle-click: type an exact amount instead of scrolling.
+                // Middle-click: type an exact amount instead of scrolling (plus the
+                // slot's other actions — tag conversion, components).
                 boolean fluid = slot.format().fluid();
                 Component label = Component.literal(slotLabel(slot) + (fluid ? " (mB)" : " (count)"));
                 int max = fluid ? 1_000_000 : 99;
-                minecraft.setScreen(toTag == null
-                        ? new AmountInputScreen(this, label, counts()[index], 1, max,
-                                amount -> counts()[slotIndex] = amount)
-                        : new AmountInputScreen(this, label, counts()[index], 1, max,
-                                amount -> counts()[slotIndex] = amount,
-                                Component.literal("Convert to #tag…"), toTag));
+                minecraft.setScreen(new AmountInputScreen(this, label, counts()[index], 1, max,
+                        amount -> counts()[slotIndex] = amount,
+                        toTag == null ? null : Component.literal("Convert to #tag…"), toTag,
+                        editComponents == null ? null : Component.literal("Edit components…"),
+                        editComponents));
                 return true;
             }
             if (toTag != null) {
                 toTag.run();
+                return true;
+            }
+            if (editComponents != null) {
+                editComponents.run();
                 return true;
             }
         }
@@ -1005,10 +1047,41 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.RED);
     }
 
+    /** Per-slot icons with the slot's components applied (key: ref + components text). */
+    private final Map<Integer, ItemStack> componentIconCache = new HashMap<>();
+    private final Map<Integer, String> componentIconKey = new HashMap<>();
+
+    /** The slot's icon with its data components applied, cached until ref or text changes. */
+    private ItemStack componentIcon(int index, ItemStack base) {
+        String key = refs()[index] + "|" + components()[index];
+        if (key.equals(componentIconKey.get(index))) {
+            ItemStack cached = componentIconCache.get(index);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        ItemStack applied = base.copy();
+        assert minecraft != null;
+        if (minecraft.level != null) {
+            try {
+                var ops = net.minecraft.resources.RegistryOps.create(
+                        com.mojang.serialization.JsonOps.INSTANCE, minecraft.level.registryAccess());
+                net.minecraft.core.component.DataComponentPatch.CODEC
+                        .parse(ops, JsonParser.parseString(components()[index]))
+                        .result().ifPresent(applied::applyComponents);
+            } catch (Exception ignored) {
+            }
+        }
+        componentIconKey.put(index, key);
+        componentIconCache.put(index, applied);
+        return applied;
+    }
+
     private void clearSlots() {
         REFS_BY_TYPE.remove(layout.typeId);
         COUNTS_BY_TYPE.remove(layout.typeId);
         CHANCES_BY_TYPE.remove(layout.typeId);
+        COMPONENTS_BY_TYPE.remove(layout.typeId);
         cursorItem = null;
         cursorTag = null;
         status = Component.empty();
@@ -1051,7 +1124,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             if (ref.startsWith("#") && !slot.acceptsTags()) {
                 throw new EditorError("that slot can't take a tag (" + ref + ")");
             }
-            setAtPath(recipe, slot.path(), slotValue(slot, ref, counts[i], chances()[i] / 100f));
+            setAtPath(recipe, slot.path(), slotValue(slot, ref, counts[i], chances()[i] / 100f,
+                    supportsComponents(slot) ? components()[i] : null));
         }
 
         for (FieldDef field : layout.fields) {
@@ -1145,7 +1219,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         recipe.add("ingredients", ingredients);
     }
 
-    private static JsonElement slotValue(SlotDef slot, String ref, int count, float chance) {
+    private static JsonElement slotValue(SlotDef slot, String ref, int count, float chance,
+                                         String components) {
         if (slot.custom() != null) {
             return slot.custom().build(ref, count, chance);
         }
@@ -1153,7 +1228,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         JsonElement value = switch (format) {
             case STRING, ITEM_ID -> new JsonPrimitive(ref);
             case SHORTHAND_RESULT -> {
-                if (count <= 1) {
+                if (count <= 1 && components == null) {
                     yield new JsonPrimitive(ref);
                 }
                 JsonObject obj = new JsonObject();
@@ -1192,6 +1267,13 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         // Generic chance support for layout files: added as a "chance" key.
         if (slot.chanceable() && chance < 1f && value instanceof JsonObject obj) {
             obj.addProperty("chance", chance);
+        }
+        // Data components on plain item-stack results, validated when they were entered.
+        if (components != null && value instanceof JsonObject obj) {
+            try {
+                obj.add("components", JsonParser.parseString(components));
+            } catch (Exception ignored) {
+            }
         }
         return value;
     }
@@ -1305,6 +1387,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
             if (slot.chanceable() && parsed.chance() > 0) {
                 chances[i] = Math.max(1, Math.min(100, Math.round(parsed.chance() * 100)));
+            }
+            if (supportsComponents(slot)) {
+                components()[i] = parsed.components();
+                componentIconCache.remove(i);
             }
             if (!array) {
                 consumed.add(slot.path());
@@ -1476,7 +1562,12 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         return current.get(last);
     }
 
-    private record Parsed(String ref, int count, float chance, boolean fluidLike) {
+    private record Parsed(String ref, int count, float chance, boolean fluidLike,
+                          String components) {
+        Parsed(String ref, int count, float chance, boolean fluidLike) {
+            this(ref, count, chance, fluidLike, null);
+        }
+
     }
 
     /**
@@ -1564,7 +1655,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 fluidLike |= nested.fluidLike();
             }
         }
-        return ref == null ? null : new Parsed(ref, count, chance, fluidLike);
+        String components = obj.get("components") instanceof JsonObject c ? c.toString() : null;
+        return ref == null ? null : new Parsed(ref, count, chance, fluidLike, components);
     }
 
     private static int intOf(JsonObject obj, String key, int fallback) {

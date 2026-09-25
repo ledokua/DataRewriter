@@ -112,6 +112,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         int countMax = 1;
         boolean countLocked;            // set_count exists but is too fancy to edit
         JsonObject countFn;             // the set_count function we manage
+        JsonObject componentsFn;        // the unconditional set_components function we manage
+        boolean componentsLocked;       // a conditional set_components exists — hands off
         int chance = 100;               // percent
         boolean chanceLocked;
         JsonObject chanceCond;          // the random_chance condition we manage
@@ -405,6 +407,19 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             entry.weight = Math.max(1, w.getAsInt());
         }
         if (source.get("functions") instanceof JsonArray functions) {
+            for (JsonElement element : functions) {
+                if (element instanceof JsonObject fn
+                        && fn.get("function") instanceof JsonPrimitive fnId && fnId.isString()
+                        && normalizeId(fnId.getAsString()).equals("minecraft:set_components")) {
+                    // Only a plain, unconditional set_components is safe to rewrite.
+                    if (!fn.has("conditions") && fn.get("components") instanceof JsonObject) {
+                        entry.componentsFn = fn;
+                    } else {
+                        entry.componentsLocked = true;
+                    }
+                    break;
+                }
+            }
             for (JsonElement element : functions) {
                 if (element instanceof JsonObject fn
                         && fn.get("function") instanceof JsonPrimitive id && id.isString()
@@ -1033,6 +1048,33 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
      * set_components / set_name / set_potion from the entry's functions are
      * applied to the icon (display-only; saving keeps the JSON untouched).
      */
+    /** Sets, replaces or removes the entry's managed {@code set_components} loot function. */
+    private void setEntryComponents(PoolState pool, EntryState entry, JsonObject components) {
+        if (components == null) {
+            if (entry.componentsFn != null
+                    && entry.source.get("functions") instanceof JsonArray functions) {
+                functions.remove(entry.componentsFn);
+                if (functions.isEmpty()) {
+                    entry.source.remove("functions");
+                }
+            }
+            entry.componentsFn = null;
+        } else {
+            if (entry.componentsFn == null) {
+                entry.componentsFn = new JsonObject();
+                entry.componentsFn.addProperty("function", "minecraft:set_components");
+                JsonArray functions = entry.source.get("functions") instanceof JsonArray a
+                        ? a : new JsonArray();
+                entry.source.add("functions", functions);
+                functions.add(entry.componentsFn);
+            }
+            entry.componentsFn.add("components", components);
+        }
+        entry.iconCache = null;
+        entry.iconCacheRef = null;
+        markEdited(pool);
+    }
+
     static ItemStack entryIcon(EntryState entry) {
         if (entry.kind != Kind.ITEM || entry.ref == null) {
             return RecipeEditorScreen.iconFor(entry.ref, false);
@@ -1232,6 +1274,12 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                             + "— shown like in game, kept exactly as-is on save.")
                             .withStyle(ChatFormatting.GRAY));
                 }
+                if (!entry.componentsLocked) {
+                    lines.add(Component.literal(entry.componentsFn != null
+                            ? "Middle-click: weight / edit its data components"
+                            : "Middle-click: weight / add data components (name, enchantments, ...)")
+                            .withStyle(ChatFormatting.GRAY));
+                }
             }
             case TAG -> {
                 lines.add(Component.literal(entry.ref).withStyle(ChatFormatting.GOLD));
@@ -1239,6 +1287,10 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                         + "(the icon cycles through them).").withStyle(ChatFormatting.GRAY));
                 lines.add(Component.literal("Bulk Replace/Remove must target the #tag itself, "
                         + "not an item inside it.").withStyle(ChatFormatting.GRAY));
+                if (!entry.componentsLocked) {
+                    lines.add(Component.literal("Middle-click: weight / data components")
+                            .withStyle(ChatFormatting.GRAY));
+                }
             }
             case EMPTY -> lines.add(Component.literal("Nothing (an 'empty' entry — a chance to "
                     + "get no drop). Click to turn it into an item."));
@@ -1467,6 +1519,15 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         if (button == 2 && !addSlot) {
             assert minecraft != null;
             EntryState entry = pool.entries.get(hit[1]);
+            Runnable editComponents = (entry.kind == Kind.ITEM || entry.kind == Kind.TAG)
+                    && !entry.componentsLocked
+                    ? () -> minecraft.setScreen(new ComponentsEditScreen(this,
+                            entry.kind == Kind.ITEM ? entry.ref : null,
+                            entry.componentsFn != null
+                                    && entry.componentsFn.get("components") instanceof JsonObject c
+                                    ? c.toString() : null,
+                            components -> setEntryComponents(pool, entry, components)))
+                    : null;
             if (entry.kind == Kind.ITEM) {
                 // Item entries also offer conversion to one of the item's
                 // tags ("any planks instead of oak planks").
@@ -1480,13 +1541,16 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                             entry.kind = Kind.TAG;
                             entry.ref = tag;
                             markEdited(pool);
-                        }))));
+                        })),
+                        editComponents == null ? null : Component.literal("Edit components…"),
+                        editComponents));
             } else {
                 minecraft.setScreen(new AmountInputScreen(this, Component.literal("Weight"),
                         entry.weight, 1, 1000, weight -> {
                     entry.weight = weight;
                     markEdited(pool);
-                }));
+                }, editComponents == null ? null : Component.literal("Edit components…"),
+                        editComponents));
             }
             return true;
         }

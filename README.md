@@ -354,8 +354,14 @@ The same controls work in every DataRewriter screen, so choosing an item never m
   appears automatically when that mod is installed; every other mod's types are covered by
   [automatic detection](#modded-recipe-types--automatic).
 - For slot types that support amounts, **scroll** over the slot to change the count; middle-click types an
-  exact amount (count or mB), with the tag conversion offered as a button. Where a recipe supports
+  exact amount (count or mB), with the slot's other actions offered as buttons in the same popup: **Convert
+  to #tag…** and, on plain item-stack result slots, **Edit components…**. Where a recipe supports
   per-result chances, **Alt+scroll** sets them.
+- **Edit components…** takes the vanilla `components` JSON object (`{"minecraft:custom_name": "...",
+  "minecraft:enchantments": {"minecraft:sharpness": 3}}`), validates it with the game's own component
+  codec against the loaded registries before accepting it, and previews the result item live in the
+  dialog. The result slot then renders the item with its components applied. Ingredients can't carry
+  components in 1.21.1 — only results.
 - Hover a text field to see the values existing recipes actually use for it (e.g. which `unit` strings a
   mod accepts) — collected automatically from all loaded recipes of that type.
 - Open any recipe in **EMI** and click its **fill (+) button** to load that recipe into the editor —
@@ -419,13 +425,16 @@ done to refresh EMI/JEI/REI. The screen remembers its slots and mode until the g
   **weight** (yellow `w` badge; the tooltip shows its share of the pool), Shift+scroll for the **count**,
   Ctrl+scroll to grow a count **range** (1–3, …), Alt+scroll for a **drop chance** (the blue `%` badge — a
   `random_chance` condition: even when a roll picks the entry, it only drops that often); middle-click
-  types an exact weight — for item entries the same popup offers **Convert to #tag…**, listing every tag
-  the item is in. Scroll over the `rolls:` text to change how many entries a pool hands out (Shift makes
-  it a range).
+  types an exact weight — the same popup offers **Convert to #tag…** for item entries (listing every tag
+  the item is in) and **Edit components…** for item and tag entries. Scroll over the `rolls:` text to
+  change how many entries a pool hands out (Shift makes it a range).
 - Drops with **data components** are drawn as they'll actually look in a chest: `set_components`,
   `set_name` and `set_potion` functions are applied to the icon (custom names, potion colors, enchanted
-  gear, …), and randomly-enchanted drops get the enchant glint. The data itself is untouched by the editor
-  and preserved exactly as-is when saving.
+  gear, …), and randomly-enchanted drops get the enchant glint. **Edit components…** (middle-click)
+  writes a plain `set_components` function on the entry — the same validated JSON dialog as the recipe
+  editor — so a drop can carry a custom name, enchantments or any other component data. Everything else
+  (other functions, a conditional `set_components`) is untouched by the editor and preserved exactly
+  as-is when saving.
 - Click a slot to set its item (`#tags` work too) — or drop an item from the inventory panel or EMI
   **anywhere on a pool's card** to add it to that pool, or exactly on a slot to replace that entry.
   Right-click the `+` slot to add an **empty entry** (a weighted chance to drop nothing); right-click an

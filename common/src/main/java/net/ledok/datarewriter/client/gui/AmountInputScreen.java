@@ -18,6 +18,8 @@ public class AmountInputScreen extends Screen {
     private final IntConsumer onSet;
     private final Component extraLabel;
     private final Runnable extraAction;
+    private final Component extraLabel2;
+    private final Runnable extraAction2;
 
     private String text;
 
@@ -28,6 +30,13 @@ public class AmountInputScreen extends Screen {
     /** With an extra action button below OK/Cancel (e.g. "Convert to tag…"). */
     public AmountInputScreen(Screen parent, Component label, int initial, int min, int max,
                              IntConsumer onSet, Component extraLabel, Runnable extraAction) {
+        this(parent, label, initial, min, max, onSet, extraLabel, extraAction, null, null);
+    }
+
+    /** With up to two extra action buttons below OK/Cancel. */
+    public AmountInputScreen(Screen parent, Component label, int initial, int min, int max,
+                             IntConsumer onSet, Component extraLabel, Runnable extraAction,
+                             Component extraLabel2, Runnable extraAction2) {
         super(Component.literal("Set amount"));
         this.parent = parent;
         this.label = label;
@@ -36,6 +45,8 @@ public class AmountInputScreen extends Screen {
         this.onSet = onSet;
         this.extraLabel = extraLabel;
         this.extraAction = extraAction;
+        this.extraLabel2 = extraLabel2;
+        this.extraAction2 = extraAction2;
         this.text = String.valueOf(initial);
     }
 
@@ -58,6 +69,10 @@ public class AmountInputScreen extends Screen {
         if (extraLabel != null && extraAction != null) {
             addRenderableWidget(Button.builder(extraLabel, b -> extraAction.run())
                     .bounds(centerX - 60, y + 48, 120, 20).build());
+        }
+        if (extraLabel2 != null && extraAction2 != null) {
+            addRenderableWidget(Button.builder(extraLabel2, b -> extraAction2.run())
+                    .bounds(centerX - 60, y + 72, 120, 20).build());
         }
     }
 
