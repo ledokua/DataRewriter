@@ -7,6 +7,7 @@ import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.JsonOps;
 import net.ledok.datarewriter.config.RewriteConfig;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateRecipesPacket;
 import net.minecraft.resources.RegistryOps;
@@ -14,9 +15,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.TagNetworkSerialization;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -121,6 +128,7 @@ public final class RecipeRewriter {
     public static void applyParsedRules(MinecraftServer server) {
         boolean changed = applyRemovalRules(server, false) > 0;
         changed |= applyIngredientReplacements(server, false) > 0;
+        changed |= applyDisabledItems(server) > 0;
         // A data reload has just pushed the un-rewritten list to everyone, so
         // this correction has to go out now — viewers are reloading anyway.
         if (changed) {
@@ -323,6 +331,320 @@ public final class RecipeRewriter {
     private static boolean isResultKey(String key) {
         String lower = key.toLowerCase(Locale.ROOT);
         return lower.contains("result") || lower.equals("output") || lower.equals("outputs");
+    }
+
+    /**
+     * The recipe half of {@code items.disable} that the derived replace_ingredients rules can't do
+     * (those already swapped replaced items out of ingredients): removes recipes whose result is a
+     * disabled item, and recipes an ingredient of which only disabled items could fill. Secondary
+     * results (a cutting board's extra drops, say) get the replacement, or leave the result list —
+     * the recipe goes only when that empties it. Runs on every start and reload. Returns the number
+     * of recipes removed or changed.
+     */
+    private static int applyDisabledItems(MinecraftServer server) {
+        if (!DisabledItems.active()) {
+            RewriteState.recipesDisabled = 0;
+            return 0;
+        }
+        RecipeManager recipeManager = server.getRecipeManager();
+        List<RecipeHolder<?>> next = new ArrayList<>(recipeManager.getRecipes().size());
+        // Signatures of the recipes the survivors of make: "redirect" rules already have, so a redirected
+        // copy that only duplicates one of them is dropped (filled lazily, then by each redirect kept).
+        Set<String> survivorRecipes = null;
+        int removed = 0;
+        int changed = 0;
+        int redirected = 0;
+        for (RecipeHolder<?> holder : recipeManager.getRecipes()) {
+            Recipe<?> recipe = holder.value();
+            JsonElement json = RewriteState.recipeJsons.get(holder.id());
+            ItemStack result = resultOf(server, recipe);
+            if (!result.isEmpty() && DisabledItems.isDisabled(result.getItem())) {
+                if (!DisabledItems.redirectsRecipes(result.getItem()) || !(json instanceof JsonObject original)
+                        || onlyDisabledFits(recipe, json)) {
+                    removed++;
+                    continue;
+                }
+                JsonObject work = original.deepCopy();
+                RecipeHolder<?> reparsed = rewriteSecondaryResults(work) ? reparse(server, holder.id(), work) : null;
+                ItemStack newResult = reparsed == null ? ItemStack.EMPTY : resultOf(server, reparsed.value());
+                if (newResult.isEmpty() || DisabledItems.isDisabled(newResult.getItem())) {
+                    Datarewriter.LOGGER.warn("Disabled items: could not redirect {} to make {} — removed",
+                            holder.id(), DisabledItems.replacement(result.getItem()));
+                    removed++;
+                    continue;
+                }
+                if (survivorRecipes == null) {
+                    survivorRecipes = survivorSignatures(server, recipeManager.getRecipes());
+                }
+                if (!survivorRecipes.add(signature(reparsed.value(), newResult))) {
+                    removed++; // the survivor can already be made exactly this way
+                    continue;
+                }
+                RewriteState.recipeJsons.put(holder.id(), work);
+                next.add(reparsed);
+                redirected++;
+                continue;
+            }
+            if (onlyDisabledFits(recipe, json)) {
+                removed++;
+                continue;
+            }
+            if (json instanceof JsonObject original && mentionsDisabledResult(original)) {
+                // No real result to tell the primary one by: whatever it makes counts as made.
+                if (result.isEmpty()) {
+                    removed++;
+                    continue;
+                }
+                JsonObject work = original.deepCopy();
+                if (!rewriteSecondaryResults(work)) {
+                    removed++;
+                    continue;
+                }
+                RecipeHolder<?> reparsed = reparse(server, holder.id(), work);
+                if (reparsed == null) {
+                    Datarewriter.LOGGER.warn("Disabled items: {} no longer parses without its disabled "
+                            + "secondary result — removed", holder.id());
+                    removed++;
+                    continue;
+                }
+                RewriteState.recipeJsons.put(holder.id(), work);
+                next.add(reparsed);
+                changed++;
+                continue;
+            }
+            next.add(holder);
+        }
+        RewriteState.recipesDisabled = removed;
+        if (removed + changed + redirected == 0) {
+            return 0;
+        }
+        recipeManager.replaceRecipes(next);
+        Datarewriter.LOGGER.info("Disabled items: removed {} recipes, redirected {} to the replacement, "
+                + "fixed secondary results in {}", removed, redirected, changed);
+        return removed + changed + redirected;
+    }
+
+    private static ItemStack resultOf(MinecraftServer server, Recipe<?> recipe) {
+        try {
+            ItemStack result = recipe.getResultItem(server.registryAccess());
+            return result == null ? ItemStack.EMPTY : result;
+        } catch (Exception e) {
+            return ItemStack.EMPTY; // context-dependent modded results — the JSON checks still apply
+        }
+    }
+
+    /** Signatures of every recipe making a redirect target (the replacement of a make: "redirect" item). */
+    private static Set<String> survivorSignatures(MinecraftServer server, Collection<RecipeHolder<?>> recipes) {
+        Set<String> signatures = new java.util.HashSet<>();
+        for (RecipeHolder<?> holder : recipes) {
+            ItemStack result = resultOf(server, holder.value());
+            if (!result.isEmpty() && !DisabledItems.isDisabled(result.getItem())) {
+                signatures.add(signature(holder.value(), result));
+            }
+        }
+        return signatures;
+    }
+
+    /**
+     * Type, result item and ingredients (each as its sorted item ids, the list sorted too — so a shaped
+     * recipe's layout and the result count don't count). Same signature = the same thing from the same inputs.
+     */
+    private static String signature(Recipe<?> recipe, ItemStack result) {
+        List<String> ingredients = new ArrayList<>();
+        try {
+            for (Ingredient ingredient : recipe.getIngredients()) {
+                if (ingredient.isEmpty()) {
+                    continue;
+                }
+                List<String> ids = new ArrayList<>();
+                for (ItemStack item : ingredient.getItems()) {
+                    ids.add(BuiltInRegistries.ITEM.getKey(item.getItem()).toString());
+                }
+                ids.sort(null);
+                ingredients.add(String.join("|", ids));
+            }
+        } catch (Exception e) {
+            return "unique:" + System.identityHashCode(recipe); // can't tell — never a duplicate
+        }
+        ingredients.sort(null);
+        return BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType()) + ">" + BuiltInRegistries.ITEM.getKey(result.getItem())
+                + "<" + String.join(",", ingredients);
+    }
+
+    /**
+     * Does some ingredient accept nothing but disabled items? Tags were pruned and replaced items were
+     * swapped already, so this is what is left: a plain ingredient of a disabled item without a
+     * replacement. Recipe types that list no ingredients are checked on their JSON instead.
+     */
+    private static boolean onlyDisabledFits(Recipe<?> recipe, JsonElement json) {
+        try {
+            List<Ingredient> ingredients = recipe.getIngredients();
+            if (ingredients.isEmpty()) {
+                return json instanceof JsonObject obj && mentionsDisabledIngredient(obj);
+            }
+            for (Ingredient ingredient : ingredients) {
+                ItemStack[] items = ingredient.getItems();
+                if (items.length == 0) {
+                    continue;
+                }
+                boolean allDisabled = true;
+                for (ItemStack item : items) {
+                    if (!DisabledItems.isDisabled(item.getItem())) {
+                        allDisabled = false;
+                        break;
+                    }
+                }
+                if (allDisabled) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            return false; // be defensive about modded ingredient implementations
+        }
+        return false;
+    }
+
+    private static boolean mentionsDisabledIngredient(JsonObject recipe) {
+        for (Map.Entry<String, JsonElement> entry : recipe.entrySet()) {
+            if (!isResultKey(entry.getKey()) && mentionsDisabled(entry.getValue(), false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean mentionsDisabledResult(JsonObject recipe) {
+        for (Map.Entry<String, JsonElement> entry : recipe.entrySet()) {
+            if (isResultKey(entry.getKey()) && mentionsDisabled(entry.getValue(), true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Any item reference to a disabled item in the subtree: an {"item"|"id": x} value, or (for results)
+     * a bare id string. {@code anyDisabled} false = only items without a replacement count.
+     */
+    private static boolean mentionsDisabled(JsonElement element, boolean anyDisabled) {
+        if (element instanceof JsonPrimitive primitive) {
+            return anyDisabled && primitive.isString() && disabledId(primitive.getAsString(), true);
+        }
+        if (element instanceof JsonArray array) {
+            for (JsonElement child : array) {
+                if (mentionsDisabled(child, anyDisabled)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!(element instanceof JsonObject obj)) {
+            return false;
+        }
+        for (Map.Entry<String, JsonElement> entry : obj.entrySet()) {
+            JsonElement value = entry.getValue();
+            if ((entry.getKey().equals("item") || entry.getKey().equals("id"))
+                    && value instanceof JsonPrimitive p && p.isString()) {
+                if (disabledId(p.getAsString(), anyDisabled)) {
+                    return true;
+                }
+            } else if (!(value instanceof JsonPrimitive) && mentionsDisabled(value, anyDisabled)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean disabledId(String text, boolean anyDisabled) {
+        ResourceLocation id = ResourceLocation.tryParse(text);
+        if (id == null) {
+            return false;
+        }
+        Optional<Item> item = BuiltInRegistries.ITEM.getOptional(id);
+        if (item.isEmpty() || !DisabledItems.isDisabled(item.get())) {
+            return false;
+        }
+        return anyDisabled || DisabledItems.replacement(item.get()) == Items.AIR;
+    }
+
+    /**
+     * Secondary results: swaps replaced items in place, and drops list elements naming an item without
+     * a replacement. False when that leaves a result empty (the recipe should go).
+     */
+    private static boolean rewriteSecondaryResults(JsonObject recipe) {
+        for (Map.Entry<String, JsonElement> entry : recipe.entrySet()) {
+            if (!isResultKey(entry.getKey())) {
+                continue;
+            }
+            if (entry.getValue() instanceof JsonPrimitive p && p.isString()) {
+                String with = replacementId(p.getAsString());
+                if (with != null) {
+                    entry.setValue(new JsonPrimitive(with)); // "result": "mod:item"
+                }
+            }
+            swapReplaced(entry.getValue());
+            if (entry.getValue() instanceof JsonArray array) {
+                boolean hadAny = !array.isEmpty();
+                for (Iterator<JsonElement> it = array.iterator(); it.hasNext(); ) {
+                    if (mentionsDisabled(it.next(), false)) {
+                        it.remove();
+                    }
+                }
+                if (hadAny && array.isEmpty()) {
+                    return false;
+                }
+            } else if (mentionsDisabled(entry.getValue(), false)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Replaces every disabled-with-replacement id ({"item"|"id": x} or a bare string in a list) in place. */
+    private static void swapReplaced(JsonElement element) {
+        if (element instanceof JsonArray array) {
+            for (int i = 0; i < array.size(); i++) {
+                if (array.get(i) instanceof JsonPrimitive p && p.isString()) {
+                    String with = replacementId(p.getAsString());
+                    if (with != null) {
+                        array.set(i, new JsonPrimitive(with));
+                    }
+                } else {
+                    swapReplaced(array.get(i));
+                }
+            }
+        } else if (element instanceof JsonObject obj) {
+            for (Map.Entry<String, JsonElement> entry : obj.entrySet()) {
+                if ((entry.getKey().equals("item") || entry.getKey().equals("id"))
+                        && entry.getValue() instanceof JsonPrimitive p && p.isString()) {
+                    String with = replacementId(p.getAsString());
+                    if (with != null) {
+                        entry.setValue(new JsonPrimitive(with));
+                    }
+                } else {
+                    swapReplaced(entry.getValue());
+                }
+            }
+        }
+    }
+
+    private static @Nullable String replacementId(String text) {
+        ResourceLocation id = ResourceLocation.tryParse(text);
+        if (id == null) {
+            return null;
+        }
+        Item with = BuiltInRegistries.ITEM.getOptional(id).map(DisabledItems::replacement).orElse(null);
+        return with == null || with == Items.AIR ? null : BuiltInRegistries.ITEM.getKey(with).toString();
+    }
+
+    private static @Nullable RecipeHolder<?> reparse(MinecraftServer server, ResourceLocation id, JsonObject json) {
+        try {
+            DataResult<Recipe<?>> result = Recipe.CODEC.parse(
+                    RegistryOps.create(JsonOps.INSTANCE, server.registryAccess()), json);
+            return result.result().<RecipeHolder<?>>map(recipe -> new RecipeHolder<>(id, recipe)).orElse(null);
+        } catch (Throwable t) {
+            return null; // mod recipe codecs may throw instead of erroring
+        }
     }
 
     /** Live edits made since the last push to clients (0 = viewers are current). */

@@ -15,6 +15,7 @@ recipe tweaker, and a loot table editor that writes straight into the running se
 [Getting started](#getting-started) · [Config files](#config-files) · [Removing recipes](#removing-recipes) ·
 [Replacing ingredients](#replacing-ingredients) · [Adding & replacing recipes](#adding--replacing-recipes) ·
 [Loot tables](#loot-tables) · [Item rules across tables](#item-rules-across-tables) ·
+[Disabling items](#disabling-items) ·
 [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) · [Loot table editor](#loot-table-editor) ·
 [Supported mods](#natively-supported-mods) · [Editor layouts](#editor-layouts--manual-override) ·
 [Datapack registries](#datapack-registries) · [Commands](#commands) · [File locations](#file-locations) ·
@@ -58,7 +59,7 @@ is special (client-side [editor layouts](#editor-layouts--manual-override), not 
 }
 ```
 
-Eight operations exist. Recipes and loot tables are rewritten independently, but within `loot_tables`
+Nine operations exist. Recipes and loot tables are rewritten independently, but within `loot_tables`
 the order below is the order they run in — `modify` also sees tables `add` created, and the two item
 rules see everything:
 
@@ -72,6 +73,7 @@ rules see everything:
 | `loot_tables` | [`modify`](#loot-tables) | Appends pools to matching tables, keeping their own loot |
 | `loot_tables` | [`replace_items`](#item-rules-across-tables) | Swaps what item entries drop, across many tables |
 | `loot_tables` | [`remove_items`](#item-rules-across-tables) | Deletes item entries, across many tables |
+| `items` | [`disable`](#disabling-items) | Takes an item out of the game: recipes, loot, tags, trades, existing stacks, EMI |
 
 Rules that match on a `#tag` (and every item rule) are applied once startup or `/reload` has finished
 rather than during loading, because item tags aren't bound yet at that point — the effect is the same.
@@ -267,6 +269,55 @@ These run **last**, so they also cover pools you added or injected, and
 table — including inside `alternatives`/`group` composites — and keep each entry's weight, count
 functions and conditions when replacing. (Tag entries and items referenced inside functions are not
 touched.)
+
+## Disabling items
+
+When two mods add the same thing — Croptopia's onion next to Farmer's Delight's — `items.disable` takes
+the one you don't want out of the game, optionally pointing everything at the one you keep:
+
+```json5
+{
+  items: {
+    disable: [
+      "croptopia:beef_stew",                                                // gone, nothing replaces it
+      { item: "farmersdelight:onion", replace_with: "croptopia:onion" },
+      { item: "somemod:*_seeds" },                                          // '*' wildcards
+      { item: "croptopia:flour", replace_with: "create:wheat_flour", make: "redirect" },
+      { item: "croptopia:calamari", replace_with: "rusticdelight:calamari", loot: "remove" },
+    ],
+  },
+}
+```
+
+For every disabled item, on startup and on each `/reload`:
+
+| Where | What happens |
+|---|---|
+| **Recipes making it** | Removed — judged by the recipe's real result, so modded types and list results (a cutting board's) are covered. Extra results of other recipes get `replace_with`, or leave the result list. |
+| **Recipes using it** | The ingredient becomes `replace_with` (exactly a [`replace_ingredients`](#replacing-ingredients) rule). Without one, recipes that can then only be filled with the disabled item are removed. |
+| **Item tags** | It is taken out of every tag, so `#c:crops/onion` stops offering it to tag recipes, tag loot and EMI. |
+| **Loot tables** | Its entries drop `replace_with`, or are deleted without one (exactly [`replace_items` / `remove_items`](#item-rules-across-tables), runtime-injected loot included). |
+| **Villagers & wandering traders** | Trades giving or asking for it get `replace_with`, or are dropped — checked when a player opens the trade screen, so saved villagers and modded trade lists are covered too. |
+| **Existing stacks** | Turn into `replace_with` with the same count and components (custom names, enchantments…), or vanish: player inventories right after joining and on every slot change, a container's contents when it is opened, and item entities when they spawn or load. |
+| **Players with the mod** | It disappears from EMI and from the creative tabs and search. Vanilla clients never get it, so they have nothing to hide. |
+
+Two options per rule change the defaults:
+
+- **`make: "redirect"`** (needs `replace_with`) keeps the recipes that make the item and makes them
+  produce `replace_with` instead, same count — for when the loser's recipe is the convenient one (flour
+  without a millstone). A redirected recipe that only duplicates one the survivor already has (same
+  station, same ingredients) is dropped. `make: "remove"` is the default.
+- **`loot: "remove"`** deletes the item's loot entries even though it has a `replace_with`. Use it where
+  a table already drops the survivor next to it — swapping would double that drop (a squid dropping both
+  mods' calamari). `loot: "replace"` is the default.
+
+Notes:
+
+- Tags can't be disabled (`#tag` in `item`), and `replace_with` must be a single item that is not itself
+  disabled. A pattern matching nothing (mod not installed) is skipped with a warning.
+- Stacks inside a container nobody opens stay as they are until someone does, and placed blocks, item
+  frames and mob equipment are not converted.
+- Several rules matching the same item: the first one wins.
 
 ## Datapack registries
 

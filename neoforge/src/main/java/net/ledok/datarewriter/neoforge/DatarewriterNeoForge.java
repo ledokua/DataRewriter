@@ -6,7 +6,9 @@ import net.ledok.datarewriter.command.ListCommand;
 import net.ledok.datarewriter.menu.EditorMenu;
 import net.ledok.datarewriter.menu.LootEditorMenu;
 import net.ledok.datarewriter.neoforge.client.NeoForgeClientPayloads;
+import net.ledok.datarewriter.DisabledItems;
 import net.ledok.datarewriter.network.BulkRecipeEditPayload;
+import net.ledok.datarewriter.network.DisabledItemsPayload;
 import net.ledok.datarewriter.network.LootEditNetworking;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RecipeSaveNetworking;
@@ -84,6 +86,8 @@ public final class DatarewriterNeoForge {
                 (p, ctx) -> RegistryEditNetworking.handleSave(server(ctx), player(ctx), p));
         r.playToClient(RegistryPayloads.EntryContent.TYPE, RegistryPayloads.EntryContent.STREAM_CODEC,
                 (p, ctx) -> NeoForgeClientPayloads.registryEntry(p));
+        r.playToClient(DisabledItemsPayload.TYPE, DisabledItemsPayload.STREAM_CODEC,
+                (p, ctx) -> DisabledItems.receive(p.items()));
     }
 
     private static ServerPlayer player(IPayloadContext ctx) {

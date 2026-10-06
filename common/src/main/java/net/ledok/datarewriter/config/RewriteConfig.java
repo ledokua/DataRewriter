@@ -29,10 +29,30 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
                             List<RegistryRemoval> registryRemovals,
                             List<RegistryAddition> registryAdditions,
                             List<RegistryModification> registryModifications,
+                            List<DisabledItem> disabledItems,
                             int errorCount) {
     public static final RewriteConfig EMPTY =
             new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+
+    /**
+     * {@code items.disable}: takes every item matching {@code item} ('*' wildcards) out of the game.
+     * Recipes that make it are removed, recipes and loot that use it get {@code replaceWith} instead (or
+     * are removed / drop nothing when it is null), it leaves every item tag and villager trade, existing
+     * stacks turn into {@code replaceWith} (or vanish), and modded clients hide it from EMI and creative.
+     * {@code lootRemove} deletes its loot entries even when there is a replacement — for tables that
+     * already drop the survivor next to it, where swapping would double the drop. {@code redirectRecipes}
+     * keeps the recipes making the item and makes them produce {@code replaceWith} instead (dropping a
+     * redirected copy that duplicates a recipe the survivor already has). The loot and ingredient parts
+     * are ordinary derived rules (see {@code ConfigLoader}); the rest is {@code DisabledItems}.
+     */
+    public record DisabledItem(ItemMatch item, @Nullable ResourceLocation replaceWith, boolean lootRemove,
+                               boolean redirectRecipes, String source) {
+        /** {@code item} is never a #tag (tags bind too late to say what is disabled). */
+        public boolean matches(ResourceLocation itemId) {
+            return item.pattern() != null && item.pattern().matches(itemId);
+        }
+    }
 
     /**
      * Skips loading every entry of the datapack registry {@code registry} whose id matches (with '*'

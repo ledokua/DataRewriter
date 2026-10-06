@@ -32,6 +32,7 @@ public final class RewriteState {
     public static volatile int recipesRemovedParsed;
     public static volatile int recipesAdded;
     public static volatile int recipesReplaced;
+    public static volatile int recipesDisabled;
     public static volatile int lootRemoved;
     public static volatile int lootAdded;
     public static volatile int lootReplaced;
@@ -76,6 +77,7 @@ public final class RewriteState {
             externallyChangedFiles.add(GuiRegistrySaver.FILE_NAME);
         }
         config = ConfigLoader.load();
+        DisabledItems.resolve(config);
         loadedOnce = true;
         return config;
     }
@@ -128,7 +130,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
                 old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.errorCount());
     }
 
     /** Same as {@link #appendLootItemReplacement} for remove_items rules. */
@@ -139,7 +141,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), List.copyOf(rules), old.registryRemovals(),
-                old.registryAdditions(), old.registryModifications(), old.errorCount());
+                old.registryAdditions(), old.registryModifications(), old.disabledItems(), old.errorCount());
     }
 
     /**
@@ -155,7 +157,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(),
-                List.copyOf(rules), old.registryModifications(), old.errorCount());
+                List.copyOf(rules), old.registryModifications(), old.disabledItems(), old.errorCount());
     }
 
     /** Same mirroring for a recipe removal rule the GUI just saved. */
@@ -166,7 +168,7 @@ public final class RewriteState {
         config = new RewriteConfig(List.copyOf(rules), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.errorCount());
     }
 
     /** Same mirroring for a replace_ingredients rule the GUI just saved. */
@@ -177,7 +179,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), List.copyOf(rules),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.errorCount());
     }
 
     /**
@@ -193,7 +195,8 @@ public final class RewriteState {
                 || !loaded.lootItemReplacements().isEmpty() || !loaded.lootItemRemovals().isEmpty();
         boolean registriesInUse = !loaded.registryRemovals().isEmpty()
                 || !loaded.registryAdditions().isEmpty() || !loaded.registryModifications().isEmpty();
-        if (!recipesInUse && !lootInUse && !registriesInUse && loaded.errorCount() == 0
+        boolean itemsInUse = !loaded.disabledItems().isEmpty();
+        if (!recipesInUse && !lootInUse && !registriesInUse && !itemsInUse && loaded.errorCount() == 0
                 && externallyChangedFiles.isEmpty()) {
             return; // mod not in use, stay quiet
         }
@@ -225,6 +228,13 @@ public final class RewriteState {
                 parts.add(lootItemsRemoved + " item entries removed");
             }
             text.append("loot tables: ").append(String.join(", ", parts));
+        }
+        if (itemsInUse) {
+            if (!text.isEmpty()) {
+                text.append("; ");
+            }
+            text.append(String.format("items: %d disabled (%d recipes making or needing them removed)",
+                    DisabledItems.count(), recipesDisabled));
         }
         if (registriesInUse) {
             if (!text.isEmpty()) {

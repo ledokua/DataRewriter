@@ -9,6 +9,7 @@ import com.google.gson.stream.JsonReader;
 import net.ledok.datarewriter.platform.Platform;
 import net.ledok.datarewriter.Datarewriter;
 import net.ledok.datarewriter.api.RewriteRules;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import org.slf4j.helpers.MessageFormatter;
 
@@ -49,7 +50,7 @@ public final class ConfigLoader {
             error("Could not create config directory {}: {}", dir, e.getMessage());
             lastIssues = List.copyOf(issues);
             return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
         }
 
         List<RewriteConfig.RemovalRule> removals = new ArrayList<>();
@@ -63,6 +64,7 @@ public final class ConfigLoader {
         List<RewriteConfig.RegistryRemoval> registryRemovals = new ArrayList<>();
         List<RewriteConfig.RegistryAddition> registryAdditions = new ArrayList<>();
         List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
+        List<RewriteConfig.DisabledItem> disabledItems = new ArrayList<>();
 
         // editor-layouts/ holds the recipe editor's CLIENT-side layout files,
         // which are not rewrite rules.
@@ -84,17 +86,19 @@ public final class ConfigLoader {
                         + lootItemReplacements.size() + lootItemRemovals.size();
                 int registryBefore = registryRemovals.size() + registryAdditions.size()
                         + registryModifications.size();
+                int itemsBefore = disabledItems.size();
                 String name = dir.relativize(file).toString().replace('\\', '/');
                 loadFile(name, file,
                         removals, additions, ingredientReplacements, lootRemovals,
                         lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals,
-                        registryRemovals, registryAdditions, registryModifications);
+                        registryRemovals, registryAdditions, registryModifications, disabledItems);
                 summaries.add(new FileSummary(name,
                         removals.size() + additions.size() + ingredientReplacements.size() - recipeBefore,
                         lootRemovals.size() + lootAdditions.size() + lootModifications.size()
                                 + lootItemReplacements.size() + lootItemRemovals.size() - lootBefore,
                         registryRemovals.size() + registryAdditions.size()
-                                + registryModifications.size() - registryBefore));
+                                + registryModifications.size() - registryBefore,
+                        disabledItems.size() - itemsBefore));
             }
             // Rules contributed from code (addon API) come after the files, so on the same id a file
             // wins, like a later file does over an earlier one.
@@ -119,12 +123,14 @@ public final class ConfigLoader {
                 registryRemovals.addAll(part.registryRemovals());
                 registryAdditions.addAll(part.registryAdditions());
                 registryModifications.addAll(part.registryModifications());
+                disabledItems.addAll(part.disabledItems());
                 summaries.add(new FileSummary(name,
                         part.removals().size() + part.additions().size() + part.ingredientReplacements().size(),
                         part.lootRemovals().size() + part.lootAdditions().size() + part.lootModifications().size()
                                 + part.lootItemReplacements().size() + part.lootItemRemovals().size(),
                         part.registryRemovals().size() + part.registryAdditions().size()
-                                + part.registryModifications().size()));
+                                + part.registryModifications().size(),
+                        part.disabledItems().size()));
             }
             lastFiles = List.copyOf(summaries);
             lastDir = dir.toAbsolutePath().toString();
@@ -134,26 +140,89 @@ public final class ConfigLoader {
             error("Could not read config directory {}", dir, e);
         }
 
+        List<RewriteConfig.DisabledItem> validDisabled = validateDisabledItems(disabledItems);
+        deriveDisabledItemRules(validDisabled, ingredientReplacements, lootItemReplacements, lootItemRemovals);
+
         lastIssues = List.copyOf(issues);
         return new RewriteConfig(List.copyOf(removals), List.copyOf(additions),
                 List.copyOf(ingredientReplacements),
                 List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                 List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                 List.copyOf(registryRemovals), List.copyOf(registryAdditions),
-                List.copyOf(registryModifications),
+                List.copyOf(registryModifications), List.copyOf(validDisabled),
                 errors);
     }
 
+    /**
+     * Drops disable rules that can't work and reports why: a replacement that is not a registered item,
+     * or one that is itself disabled (a chain would leave stacks converting forever). A pattern matching
+     * no item only warns — the mod may simply not be installed on this side.
+     */
+    private static List<RewriteConfig.DisabledItem> validateDisabledItems(List<RewriteConfig.DisabledItem> rules) {
+        List<RewriteConfig.DisabledItem> valid = new ArrayList<>();
+        for (RewriteConfig.DisabledItem rule : rules) {
+            boolean matchesAny = BuiltInRegistries.ITEM.keySet().stream()
+                    .anyMatch(id -> rule.matches(id) && !id.equals(AIR));
+            if (!matchesAny) {
+                warn("[{}] items disable: '{}' matches no registered item — skipped", rule.source(), rule.item());
+                continue;
+            }
+            ResourceLocation with = rule.replaceWith();
+            if (with != null) {
+                if (with.equals(AIR) || !BuiltInRegistries.ITEM.containsKey(with)) {
+                    error("[{}] items disable '{}': replace_with '{}' is not a registered item — rule skipped",
+                            rule.source(), rule.item(), with);
+                    continue;
+                }
+                boolean chained = rules.stream().anyMatch(other -> other.matches(with));
+                if (chained) {
+                    error("[{}] items disable '{}': replace_with '{}' is disabled too — rule skipped",
+                            rule.source(), rule.item(), with);
+                    continue;
+                }
+            }
+            valid.add(rule);
+        }
+        return valid;
+    }
+
+    private static final ResourceLocation AIR = ResourceLocation.withDefaultNamespace("air");
+
+    /**
+     * The loot and ingredient halves of {@code items.disable} are exactly the existing bulk rules, so
+     * they are added as such and inherit their coverage (runtime-injected loot, the post-load #tag pass,
+     * re-parsing). Recipes making the item, tags, trades and stacks are {@code DisabledItems}' job.
+     */
+    private static void deriveDisabledItemRules(List<RewriteConfig.DisabledItem> rules,
+                                                List<RewriteConfig.IngredientReplacement> ingredientReplacements,
+                                                List<RewriteConfig.LootItemReplacement> lootItemReplacements,
+                                                List<RewriteConfig.LootItemRemoval> lootItemRemovals) {
+        for (RewriteConfig.DisabledItem rule : rules) {
+            ItemMatch match = rule.item();
+            String source = rule.source() + " (items.disable)";
+            if (rule.replaceWith() != null) {
+                ingredientReplacements.add(new RewriteConfig.IngredientReplacement(match,
+                        rule.replaceWith().toString(), source));
+            }
+            if (rule.replaceWith() != null && !rule.lootRemove()) {
+                lootItemReplacements.add(new RewriteConfig.LootItemReplacement(match, rule.replaceWith(), null, source));
+            } else {
+                lootItemRemovals.add(new RewriteConfig.LootItemRemoval(match, null, source));
+            }
+        }
+    }
+
     /** One config file of the last load and how many rules it contributed. */
-    public record FileSummary(String name, int recipeRules, int lootRules, int registryRules) {
+    public record FileSummary(String name, int recipeRules, int lootRules, int registryRules, int itemRules) {
         public FileSummary(String name, int recipeRules, int lootRules) {
-            this(name, recipeRules, lootRules, 0);
+            this(name, recipeRules, lootRules, 0, 0);
         }
 
         @Override
         public String toString() {
             return name + " (" + recipeRules + " recipe, " + lootRules + " loot"
-                    + (registryRules > 0 ? ", " + registryRules + " registry" : "") + " rules)";
+                    + (registryRules > 0 ? ", " + registryRules + " registry" : "")
+                    + (itemRules > 0 ? ", " + itemRules + " item" : "") + " rules)";
         }
     }
 
@@ -197,7 +266,8 @@ public final class ConfigLoader {
                                  List<RewriteConfig.LootItemRemoval> lootItemRemovals,
                                  List<RewriteConfig.RegistryRemoval> registryRemovals,
                                  List<RewriteConfig.RegistryAddition> registryAdditions,
-                                 List<RewriteConfig.RegistryModification> registryModifications) {
+                                 List<RewriteConfig.RegistryModification> registryModifications,
+                                 List<RewriteConfig.DisabledItem> disabledItems) {
         JsonObject root;
         try {
             String content = stripCommentsAndTrailingCommas(Files.readString(file));
@@ -240,13 +310,101 @@ public final class ConfigLoader {
             }
         }
 
+        if (root.has("items")) {
+            if (root.get("items") instanceof JsonObject items) {
+                readItemsSection(items, fileName, disabledItems);
+            } else {
+                error("[{}] 'items' must be an object with a 'disable' list", fileName);
+            }
+        }
+
         for (String key : root.keySet()) {
             if (key.equals("remove") || key.equals("add")) {
                 error("[{}] '{}' must be inside a 'recipes: { ... }' section, ignoring it", fileName, key);
-            } else if (!key.equals("recipes") && !key.equals("loot_tables") && !key.equals("registries")) {
-                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables' or 'registries')",
+            } else if (!List.of("recipes", "loot_tables", "registries", "items").contains(key)) {
+                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables', 'registries' or 'items')",
                         fileName, key);
             }
+        }
+    }
+
+    /**
+     * items: { disable: [ "mod:item", { item: "mod:*_seeds", replace_with: "other:item",
+     * make: "remove"|"redirect", loot: "replace"|"remove" } ] }
+     */
+    private static void readItemsSection(JsonObject items, String fileName,
+                                         List<RewriteConfig.DisabledItem> disabledItems) {
+        for (String key : items.keySet()) {
+            if (!key.equals("disable")) {
+                warn("[{}] items: unknown key '{}' (expected 'disable')", fileName, key);
+            }
+        }
+        if (!items.has("disable")) {
+            return;
+        }
+        if (!(items.get("disable") instanceof JsonArray array)) {
+            error("[{}] items 'disable' must be a list", fileName);
+            return;
+        }
+        int index = 0;
+        for (JsonElement entry : array) {
+            index++;
+            String itemText;
+            String withText = null;
+            boolean lootRemove = false;
+            boolean redirect = false;
+            if (entry instanceof JsonPrimitive primitive && primitive.isString()) {
+                itemText = primitive.getAsString();
+            } else if (entry instanceof JsonObject obj) {
+                itemText = readString(obj, "item");
+                withText = readString(obj, "replace_with");
+                String loot = readString(obj, "loot");
+                if (loot != null && !loot.equals("replace") && !loot.equals("remove")) {
+                    error("[{}] items disable[{}]: 'loot' must be \"replace\" or \"remove\", not '{}'",
+                            fileName, index, loot);
+                    continue;
+                }
+                lootRemove = "remove".equals(loot);
+                String make = readString(obj, "make");
+                if (make != null && !make.equals("remove") && !make.equals("redirect")) {
+                    error("[{}] items disable[{}]: 'make' must be \"remove\" or \"redirect\", not '{}'",
+                            fileName, index, make);
+                    continue;
+                }
+                redirect = "redirect".equals(make);
+                for (String key : obj.keySet()) {
+                    if (!List.of("item", "replace_with", "loot", "make").contains(key)) {
+                        warn("[{}] items disable[{}]: unknown key '{}'", fileName, index, key);
+                    }
+                }
+            } else {
+                if (!entry.isJsonNull()) {
+                    error("[{}] items disable[{}] must be an item id or an object like "
+                            + "{ item: \"mod:item\", replace_with: \"other:item\" }", fileName, index);
+                }
+                continue;
+            }
+            ItemMatch item = itemText == null || itemText.startsWith("#") ? null : ItemMatch.parse(itemText);
+            if (item == null) {
+                error("[{}] items disable[{}] needs 'item' — an item id with optional '*' wildcards "
+                        + "(tags are not supported)", fileName, index);
+                continue;
+            }
+            ResourceLocation with = null;
+            if (withText != null) {
+                with = withText.contains("*") || withText.startsWith("#") ? null : ResourceLocation.tryParse(withText);
+                if (with == null) {
+                    error("[{}] items disable[{}]: 'replace_with' must be one item id, not '{}'",
+                            fileName, index, withText);
+                    continue;
+                }
+            }
+            if (redirect && with == null) {
+                error("[{}] items disable[{}]: make: \"redirect\" needs 'replace_with' — the item its recipes "
+                        + "make instead", fileName, index);
+                continue;
+            }
+            disabledItems.add(new RewriteConfig.DisabledItem(item, with, lootRemove, redirect, fileName));
         }
     }
 
@@ -984,6 +1142,26 @@ public final class ConfigLoader {
                 ],
               },
             }
+
+            // ---- Disabling items -------------------------------------------------------
+            // Takes an item out of the game: recipes making it are removed, recipes and
+            // loot using it get "replace_with" (or are removed / drop nothing without
+            // one), it leaves every item tag and villager trade, existing stacks turn
+            // into "replace_with" (or vanish), and players with the mod no longer see
+            // it in EMI or the creative tabs. '*' wildcards allowed in "item".
+            //   make: "remove" (default) deletes the recipes making it; "redirect" keeps
+            //         them and makes them produce replace_with instead.
+            //   loot: "replace" (default) swaps its loot entries to replace_with;
+            //         "remove" deletes them (when the table already drops the survivor).
+            //
+            // items: {
+            //   disable: [
+            //     "croptopia:beef_stew",
+            //     { item: "farmersdelight:onion", replace_with: "croptopia:onion" },
+            //     { item: "croptopia:flour", replace_with: "create:wheat_flour", make: "redirect" },
+            //     { item: "croptopia:calamari", replace_with: "rusticdelight:calamari", loot: "remove" },
+            //   ],
+            // },
 
             // ---- Datapack registries (advanced) --------------------------------------
             // Entries of ANY datapack registry — Forbidden Arcanus rituals, enchantments,

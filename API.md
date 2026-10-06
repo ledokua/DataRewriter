@@ -70,6 +70,7 @@ One builder method per config operation:
 | `removeRegistryEntries(registry, idPattern)` | `registries.remove` |
 | `addRegistryEntry(registry, id, json)` | `registries.add` |
 | `modifyRegistryEntries(registry, idPattern, merge)` | `registries.modify` |
+| `disableItem(item, replaceWith)` · `disableItem(item, replaceWith, lootRemove, redirectRecipes)` | `items.disable` |
 
 Arguments use the config syntax: id patterns take `*` wildcards, item matches take wildcards or a
 `#tag`, `output`/`input`/`to` take an item id or `#tag`, `tables` is a scope list (`"minecraft:chests/*,

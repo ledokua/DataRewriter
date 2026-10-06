@@ -12,6 +12,7 @@ import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
 import dev.emi.emi.api.stack.EmiStackInteraction;
 import dev.emi.emi.api.widget.Bounds;
+import net.ledok.datarewriter.DisabledItems;
 import net.ledok.datarewriter.client.gui.CompositeEntryScreen;
 import net.ledok.datarewriter.client.gui.ItemSelectScreen;
 import net.ledok.datarewriter.client.gui.LootTableEditorScreen;
@@ -41,6 +42,14 @@ import java.util.List;
 public class DataRewriterEmiPlugin implements EmiPlugin {
     @Override
     public void register(EmiRegistry registry) {
+        // items.disable: the server sends its list ahead of the recipes, so it is in place by now.
+        if (DisabledItems.clientActive()) {
+            registry.removeEmiStacks(stack -> {
+                ItemStack item = stack.getItemStack();
+                return !item.isEmpty() && DisabledItems.hiddenOnClient(item.getItem());
+            });
+        }
+
         registry.addDragDropHandler(RecipeEditorScreen.class, new EmiDragDropHandler<>() {
             @Override
             public boolean dropStack(RecipeEditorScreen screen, EmiIngredient ingredient, int x, int y) {

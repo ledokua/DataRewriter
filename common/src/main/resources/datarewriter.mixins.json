@@ -4,16 +4,27 @@
   "package": "net.ledok.datarewriter.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "AbstractContainerMenuMixin",
+    "AbstractVillagerMixin",
+    "CreativeModeTabMixin",
+    "CreativeModeTabsAccessor",
     "HolderReferenceInvoker",
+    "ItemEntityMixin",
     "MappedRegistryAccessor",
+    "PlayerListMixin",
     "RecipeManagerMixin",
     "RegistryDataLoaderMixin",
-    "SimpleJsonResourceReloadListenerMixin"
+    "ServerLevelMixin",
+    "SimpleJsonResourceReloadListenerMixin",
+    "TagLoaderMixin"
   ],
   "injectors": {
     "defaultRequire": 1
   },
   "overwrites": {
     "requireAnnotations": true
-  }
+  },
+  "client": [
+    "ClientPacketListenerMixin"
+  ]
 }

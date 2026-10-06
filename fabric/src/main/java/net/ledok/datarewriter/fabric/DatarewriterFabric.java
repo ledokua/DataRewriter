@@ -13,6 +13,7 @@ import net.ledok.datarewriter.menu.EditorMenu;
 import net.ledok.datarewriter.menu.LootEditorMenu;
 import net.ledok.datarewriter.network.BulkRecipeEditPayload;
 import net.ledok.datarewriter.network.LootEditNetworking;
+import net.ledok.datarewriter.network.DisabledItemsPayload;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RecipeSaveNetworking;
 import net.ledok.datarewriter.network.RegistryEditNetworking;
@@ -48,6 +49,7 @@ public final class DatarewriterFabric implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(RegistryPayloads.EntryRequest.TYPE, RegistryPayloads.EntryRequest.STREAM_CODEC);
         PayloadTypeRegistry.playC2S().register(RegistryPayloads.SaveEntry.TYPE, RegistryPayloads.SaveEntry.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(RegistryPayloads.EntryContent.TYPE, RegistryPayloads.EntryContent.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(DisabledItemsPayload.TYPE, DisabledItemsPayload.STREAM_CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(SaveRecipePayload.TYPE,
                 (payload, context) -> RecipeSaveNetworking.handleSave(context.server(), context.player(), payload));

@@ -64,6 +64,7 @@ public final class RewriteRules {
         private final List<RewriteConfig.RegistryRemoval> registryRemovals = new ArrayList<>();
         private final List<RewriteConfig.RegistryAddition> registryAdditions = new ArrayList<>();
         private final List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
+        private final List<RewriteConfig.DisabledItem> disabledItems = new ArrayList<>();
 
         public Builder(String source) {
             this.source = source;
@@ -197,13 +198,40 @@ public final class RewriteRules {
             return this;
         }
 
+        // ---- items ----
+
+        /**
+         * {@code items.disable}: takes every item matching {@code item} ({@code *} wildcards) out of the game —
+         * recipes making it are removed, recipes, loot, trades and existing stacks get {@code replaceWith}
+         * instead (or lose it when null), and it leaves every item tag. {@code lootRemove} deletes its loot
+         * entries even with a replacement, for tables that already drop the survivor too;
+         * {@code redirectRecipes} keeps the recipes making it, producing {@code replaceWith} instead.
+         */
+        public Builder disableItem(String item, @Nullable ResourceLocation replaceWith, boolean lootRemove,
+                                   boolean redirectRecipes) {
+            if (redirectRecipes && replaceWith == null) {
+                throw new IllegalArgumentException("redirecting recipes needs a replacement item");
+            }
+            if (item.startsWith("#")) {
+                throw new IllegalArgumentException("items can only be disabled by id or '*' pattern, not by #tag");
+            }
+            disabledItems.add(new RewriteConfig.DisabledItem(itemMatch(item), replaceWith, lootRemove,
+                    redirectRecipes, source));
+            return this;
+        }
+
+        /** {@link #disableItem(String, ResourceLocation, boolean, boolean)}: loot swapped, recipes making it removed. */
+        public Builder disableItem(String item, @Nullable ResourceLocation replaceWith) {
+            return disableItem(item, replaceWith, false, false);
+        }
+
         /** The collected rules as one config fragment (error count 0). */
         public RewriteConfig build() {
             return new RewriteConfig(List.copyOf(removals), List.copyOf(additions), List.copyOf(ingredientReplacements),
                     List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                     List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                     List.copyOf(registryRemovals), List.copyOf(registryAdditions),
-                    List.copyOf(registryModifications), 0);
+                    List.copyOf(registryModifications), List.copyOf(disabledItems), 0);
         }
 
         private static IdPattern idPattern(String value) {
