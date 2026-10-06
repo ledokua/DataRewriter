@@ -472,7 +472,7 @@ public final class RecipeRewriter {
     }
 
     /**
-     * Does some ingredient accept nothing but disabled items? Tags were pruned and replaced items were
+     * Does some ingredient accept nothing but disabled items? Tags were rewritten and replaced items were
      * swapped already, so this is what is left: a plain ingredient of a disabled item without a
      * replacement. Recipe types that list no ingredients are checked on their JSON instead.
      */
@@ -480,12 +480,21 @@ public final class RecipeRewriter {
         try {
             List<Ingredient> ingredients = recipe.getIngredients();
             if (ingredients.isEmpty()) {
-                return json instanceof JsonObject obj && mentionsDisabledIngredient(obj);
+                return json instanceof JsonObject obj
+                        && (mentionsDisabledIngredient(obj) || mentionsEmptiedTagIngredient(obj));
             }
             for (Ingredient ingredient : ingredients) {
                 ItemStack[] items = ingredient.getItems();
+                // A tag that only held disabled items without a replacement is empty now. Vanilla (Fabric)
+                // lists no items for it, NeoForge a named barrier placeholder.
                 if (items.length == 0) {
+                    if (!ingredient.isEmpty() && json instanceof JsonObject obj && mentionsEmptiedTagIngredient(obj)) {
+                        return true;
+                    }
                     continue;
+                }
+                if (isEmptiedTagPlaceholder(items)) {
+                    return true;
                 }
                 boolean allDisabled = true;
                 for (ItemStack item : items) {
@@ -502,6 +511,58 @@ public final class RecipeRewriter {
             return false; // be defensive about modded ingredient implementations
         }
         return false;
+    }
+
+    private static boolean mentionsEmptiedTagIngredient(JsonObject recipe) {
+        for (Map.Entry<String, JsonElement> entry : recipe.entrySet()) {
+            if (!isResultKey(entry.getKey()) && mentionsEmptiedTag(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Recipe types listing no ingredients: any {"tag": t} reference to an emptied tag outside the results. */
+    private static boolean mentionsEmptiedTag(JsonElement element) {
+        if (element instanceof JsonArray array) {
+            for (JsonElement child : array) {
+                if (mentionsEmptiedTag(child)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!(element instanceof JsonObject obj)) {
+            return false;
+        }
+        if (obj.get("tag") instanceof JsonPrimitive p && p.isString()) {
+            ResourceLocation tag = ResourceLocation.tryParse(p.getAsString());
+            if (tag != null && DisabledItems.isEmptiedTag(tag)) {
+                return true;
+            }
+        }
+        for (Map.Entry<String, JsonElement> entry : obj.entrySet()) {
+            if (!isResultKey(entry.getKey()) && mentionsEmptiedTag(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * NeoForge shows an empty tag ingredient as one barrier named "Empty Tag: ns:path"; true when that tag
+     * is one disabling emptied (tags broken for other reasons are left alone).
+     */
+    private static boolean isEmptiedTagPlaceholder(ItemStack[] items) {
+        if (items.length != 1 || !items[0].is(net.minecraft.world.item.Items.BARRIER)) {
+            return false;
+        }
+        net.minecraft.network.chat.Component name = items[0].get(net.minecraft.core.component.DataComponents.CUSTOM_NAME);
+        if (name == null || !name.getString().startsWith("Empty Tag: ")) {
+            return false;
+        }
+        ResourceLocation tag = ResourceLocation.tryParse(name.getString().substring("Empty Tag: ".length()));
+        return tag != null && DisabledItems.isEmptiedTag(tag);
     }
 
     private static boolean mentionsDisabledIngredient(JsonObject recipe) {

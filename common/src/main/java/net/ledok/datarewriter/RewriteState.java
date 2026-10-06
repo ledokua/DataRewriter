@@ -130,7 +130,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
                 old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.disabledItems(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
     }
 
     /** Same as {@link #appendLootItemReplacement} for remove_items rules. */
@@ -141,7 +141,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), List.copyOf(rules), old.registryRemovals(),
-                old.registryAdditions(), old.registryModifications(), old.disabledItems(), old.errorCount());
+                old.registryAdditions(), old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
     }
 
     /**
@@ -157,7 +157,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(),
-                List.copyOf(rules), old.registryModifications(), old.disabledItems(), old.errorCount());
+                List.copyOf(rules), old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
     }
 
     /** Same mirroring for a recipe removal rule the GUI just saved. */
@@ -168,7 +168,7 @@ public final class RewriteState {
         config = new RewriteConfig(List.copyOf(rules), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.disabledItems(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
     }
 
     /** Same mirroring for a replace_ingredients rule the GUI just saved. */
@@ -179,7 +179,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), List.copyOf(rules),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.disabledItems(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
     }
 
     /**

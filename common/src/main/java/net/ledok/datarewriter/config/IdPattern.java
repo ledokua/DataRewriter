@@ -13,15 +13,18 @@ import java.util.regex.Pattern;
 public final class IdPattern {
     private final @Nullable String literal;
     private final @Nullable Pattern regex;
+    /** The pattern as written, for messages. */
+    private final String source;
 
-    private IdPattern(@Nullable String literal, @Nullable Pattern regex) {
+    private IdPattern(@Nullable String literal, @Nullable Pattern regex, String source) {
         this.literal = literal;
         this.regex = regex;
+        this.source = source;
     }
 
     @Override
     public String toString() {
-        return literal != null ? literal : regex != null ? regex.pattern() : "?";
+        return literal != null ? literal : source;
     }
 
     /** Returns null if the value is not a valid id or pattern. */
@@ -38,10 +41,10 @@ public final class IdPattern {
                     regex.append(Pattern.quote(parts[i]));
                 }
             }
-            return new IdPattern(null, Pattern.compile(regex.toString()));
+            return new IdPattern(null, Pattern.compile(regex.toString()), withNamespace);
         }
         ResourceLocation id = ResourceLocation.tryParse(value);
-        return id == null ? null : new IdPattern(id.toString(), null);
+        return id == null ? null : new IdPattern(id.toString(), null, id.toString());
     }
 
     public boolean matches(ResourceLocation id) {

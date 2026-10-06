@@ -65,6 +65,7 @@ public final class RewriteRules {
         private final List<RewriteConfig.RegistryAddition> registryAdditions = new ArrayList<>();
         private final List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
         private final List<RewriteConfig.DisabledItem> disabledItems = new ArrayList<>();
+        private final List<RewriteConfig.FeatureRemoval> featureRemovals = new ArrayList<>();
 
         public Builder(String source) {
             this.source = source;
@@ -225,13 +226,24 @@ public final class RewriteRules {
             return disableItem(item, replaceWith, false, false);
         }
 
+        // ---- worldgen ----
+
+        /**
+         * {@code worldgen.remove_features}: placed features matching {@code idPattern} ({@code *} wildcards)
+         * stop generating in every biome, in chunks generated from now on.
+         */
+        public Builder removeFeatures(String idPattern) {
+            featureRemovals.add(new RewriteConfig.FeatureRemoval(idPattern(idPattern), source));
+            return this;
+        }
+
         /** The collected rules as one config fragment (error count 0). */
         public RewriteConfig build() {
             return new RewriteConfig(List.copyOf(removals), List.copyOf(additions), List.copyOf(ingredientReplacements),
                     List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                     List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                     List.copyOf(registryRemovals), List.copyOf(registryAdditions),
-                    List.copyOf(registryModifications), List.copyOf(disabledItems), 0);
+                    List.copyOf(registryModifications), List.copyOf(disabledItems), List.copyOf(featureRemovals), 0);
         }
 
         private static IdPattern idPattern(String value) {

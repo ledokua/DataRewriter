@@ -50,7 +50,7 @@ public final class ConfigLoader {
             error("Could not create config directory {}: {}", dir, e.getMessage());
             lastIssues = List.copyOf(issues);
             return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
         }
 
         List<RewriteConfig.RemovalRule> removals = new ArrayList<>();
@@ -65,6 +65,7 @@ public final class ConfigLoader {
         List<RewriteConfig.RegistryAddition> registryAdditions = new ArrayList<>();
         List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
         List<RewriteConfig.DisabledItem> disabledItems = new ArrayList<>();
+        List<RewriteConfig.FeatureRemoval> featureRemovals = new ArrayList<>();
 
         // editor-layouts/ holds the recipe editor's CLIENT-side layout files,
         // which are not rewrite rules.
@@ -86,19 +87,20 @@ public final class ConfigLoader {
                         + lootItemReplacements.size() + lootItemRemovals.size();
                 int registryBefore = registryRemovals.size() + registryAdditions.size()
                         + registryModifications.size();
-                int itemsBefore = disabledItems.size();
+                int itemsBefore = disabledItems.size() + featureRemovals.size();
                 String name = dir.relativize(file).toString().replace('\\', '/');
                 loadFile(name, file,
                         removals, additions, ingredientReplacements, lootRemovals,
                         lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals,
-                        registryRemovals, registryAdditions, registryModifications, disabledItems);
+                        registryRemovals, registryAdditions, registryModifications, disabledItems,
+                        featureRemovals);
                 summaries.add(new FileSummary(name,
                         removals.size() + additions.size() + ingredientReplacements.size() - recipeBefore,
                         lootRemovals.size() + lootAdditions.size() + lootModifications.size()
                                 + lootItemReplacements.size() + lootItemRemovals.size() - lootBefore,
                         registryRemovals.size() + registryAdditions.size()
                                 + registryModifications.size() - registryBefore,
-                        disabledItems.size() - itemsBefore));
+                        disabledItems.size() + featureRemovals.size() - itemsBefore));
             }
             // Rules contributed from code (addon API) come after the files, so on the same id a file
             // wins, like a later file does over an earlier one.
@@ -124,13 +126,14 @@ public final class ConfigLoader {
                 registryAdditions.addAll(part.registryAdditions());
                 registryModifications.addAll(part.registryModifications());
                 disabledItems.addAll(part.disabledItems());
+                featureRemovals.addAll(part.featureRemovals());
                 summaries.add(new FileSummary(name,
                         part.removals().size() + part.additions().size() + part.ingredientReplacements().size(),
                         part.lootRemovals().size() + part.lootAdditions().size() + part.lootModifications().size()
                                 + part.lootItemReplacements().size() + part.lootItemRemovals().size(),
                         part.registryRemovals().size() + part.registryAdditions().size()
                                 + part.registryModifications().size(),
-                        part.disabledItems().size()));
+                        part.disabledItems().size() + part.featureRemovals().size()));
             }
             lastFiles = List.copyOf(summaries);
             lastDir = dir.toAbsolutePath().toString();
@@ -149,7 +152,7 @@ public final class ConfigLoader {
                 List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                 List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                 List.copyOf(registryRemovals), List.copyOf(registryAdditions),
-                List.copyOf(registryModifications), List.copyOf(validDisabled),
+                List.copyOf(registryModifications), List.copyOf(validDisabled), List.copyOf(featureRemovals),
                 errors);
     }
 
@@ -267,7 +270,8 @@ public final class ConfigLoader {
                                  List<RewriteConfig.RegistryRemoval> registryRemovals,
                                  List<RewriteConfig.RegistryAddition> registryAdditions,
                                  List<RewriteConfig.RegistryModification> registryModifications,
-                                 List<RewriteConfig.DisabledItem> disabledItems) {
+                                 List<RewriteConfig.DisabledItem> disabledItems,
+                                 List<RewriteConfig.FeatureRemoval> featureRemovals) {
         JsonObject root;
         try {
             String content = stripCommentsAndTrailingCommas(Files.readString(file));
@@ -317,14 +321,52 @@ public final class ConfigLoader {
                 error("[{}] 'items' must be an object with a 'disable' list", fileName);
             }
         }
+        if (root.has("worldgen")) {
+            if (root.get("worldgen") instanceof JsonObject worldgen) {
+                readWorldgenSection(worldgen, fileName, featureRemovals);
+            } else {
+                error("[{}] 'worldgen' must be an object with a 'remove_features' list", fileName);
+            }
+        }
 
         for (String key : root.keySet()) {
             if (key.equals("remove") || key.equals("add")) {
                 error("[{}] '{}' must be inside a 'recipes: { ... }' section, ignoring it", fileName, key);
-            } else if (!List.of("recipes", "loot_tables", "registries", "items").contains(key)) {
-                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables', 'registries' or 'items')",
-                        fileName, key);
+            } else if (!List.of("recipes", "loot_tables", "registries", "items", "worldgen").contains(key)) {
+                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables', 'registries', 'items' "
+                        + "or 'worldgen')", fileName, key);
             }
+        }
+    }
+
+    /** worldgen: { remove_features: [ "farmersdelight:patch_wild_onions", "somemod:ore_*" ] } */
+    private static void readWorldgenSection(JsonObject worldgen, String fileName,
+                                            List<RewriteConfig.FeatureRemoval> featureRemovals) {
+        for (String key : worldgen.keySet()) {
+            if (!key.equals("remove_features")) {
+                warn("[{}] worldgen: unknown key '{}' (expected 'remove_features')", fileName, key);
+            }
+        }
+        if (!worldgen.has("remove_features")) {
+            return;
+        }
+        if (!(worldgen.get("remove_features") instanceof JsonArray array)) {
+            error("[{}] worldgen 'remove_features' must be a list of placed feature ids", fileName);
+            return;
+        }
+        int index = 0;
+        for (JsonElement entry : array) {
+            index++;
+            if (entry.isJsonNull()) {
+                continue;
+            }
+            IdPattern pattern = entry instanceof JsonPrimitive p && p.isString() ? IdPattern.parse(p.getAsString()) : null;
+            if (pattern == null) {
+                error("[{}] worldgen remove_features[{}] must be a placed feature id (with optional '*' "
+                        + "wildcards), like \"farmersdelight:patch_wild_onions\"", fileName, index);
+                continue;
+            }
+            featureRemovals.add(new RewriteConfig.FeatureRemoval(pattern, fileName));
         }
     }
 
@@ -1160,6 +1202,18 @@ public final class ConfigLoader {
             //     { item: "farmersdelight:onion", replace_with: "croptopia:onion" },
             //     { item: "croptopia:flour", replace_with: "create:wheat_flour", make: "redirect" },
             //     { item: "croptopia:calamari", replace_with: "rusticdelight:calamari", loot: "remove" },
+            //   ],
+            // },
+
+            // ---- Worldgen features -----------------------------------------------------
+            // Placed features (data/<mod>/worldgen/placed_feature/) that stop generating
+            // in every biome — wild crops, ores, trees. '*' wildcards allowed. Only new
+            // chunks are affected.
+            //
+            // worldgen: {
+            //   remove_features: [
+            //     "farmersdelight:patch_wild_onions",
+            //     "somemod:ore_*",
             //   ],
             // },
 

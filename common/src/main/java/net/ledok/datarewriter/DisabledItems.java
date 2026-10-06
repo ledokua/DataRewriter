@@ -41,6 +41,8 @@ public final class DisabledItems {
     private static volatile Map<Item, Item> server = Map.of();
     /** Disabled items whose recipes are redirected to the replacement instead of removed. */
     private static volatile Set<Item> redirected = Set.of();
+    /** Item tags the last tag build left empty by removing disabled items without a replacement. */
+    private static final Set<ResourceLocation> emptiedTags = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** What this client's current server disabled (by id, for EMI and the creative tabs). */
     private static volatile Set<Item> client = Set.of();
 
@@ -95,6 +97,21 @@ public final class DisabledItems {
     /** Recipes making this (disabled) item should make its replacement instead of going. */
     public static boolean redirectsRecipes(Item item) {
         return redirected.contains(item);
+    }
+
+    /** Called by the tag build (TagLoaderMixin) at the start of every item tag rebuild. */
+    public static void clearEmptiedTags() {
+        emptiedTags.clear();
+    }
+
+    /** Called by the tag build for a tag that disabled items left empty. */
+    public static void tagEmptied(ResourceLocation tag) {
+        emptiedTags.add(tag);
+    }
+
+    /** Was this item tag emptied by disabling its items? Recipes needing it can't be crafted any more. */
+    public static boolean isEmptiedTag(ResourceLocation tag) {
+        return emptiedTags.contains(tag);
     }
 
     public static int count() {

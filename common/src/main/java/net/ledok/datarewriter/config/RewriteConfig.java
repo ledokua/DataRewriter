@@ -30,10 +30,19 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
                             List<RegistryAddition> registryAdditions,
                             List<RegistryModification> registryModifications,
                             List<DisabledItem> disabledItems,
+                            List<FeatureRemoval> featureRemovals,
                             int errorCount) {
     public static final RewriteConfig EMPTY =
             new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+
+    /**
+     * {@code worldgen.remove_features}: placed features matching {@code feature} ('*' wildcards) stop
+     * generating in every biome — however they got there (biome JSON, Fabric BiomeModifications, NeoForge
+     * biome modifiers). Affects chunks generated from now on; existing terrain keeps what it has.
+     */
+    public record FeatureRemoval(IdPattern feature, String source) {
+    }
 
     /**
      * {@code items.disable}: takes every item matching {@code item} ('*' wildcards) out of the game.

@@ -11,6 +11,7 @@
     "HolderReferenceInvoker",
     "ItemEntityMixin",
     "MappedRegistryAccessor",
+    "PlacedFeatureMixin",
     "PlayerListMixin",
     "RecipeManagerMixin",
     "RegistryDataLoaderMixin",

@@ -3,19 +3,38 @@
 Recipe and loot table rewriting for Minecraft **1.21.1** (Fabric and NeoForge). Remove, replace and add
 recipes and loot tables through plain config files — KubeJS-style control without a scripting engine —
 or skip the JSON entirely and do it in game: a recipe editor drawn on each station's own GUI, a bulk
-recipe tweaker, and a loot table editor that writes straight into the running server.
+recipe tweaker, and a loot table editor that writes straight into the running server. It can also take
+whole items out of the game and switch off worldgen features.
 
 > Minecraft 1.21.1 · Java 21 · Fabric (needs [Fabric API](https://modrinth.com/mod/fabric-api)) or
 > NeoForge, one jar per loader. **Server-side.** Vanilla clients can join and get every rewritten recipe
 > through normal recipe sync; installing the mod on your own client is what adds the editors. All in-game
 > editing requires operator level 2.
 
+## Find a feature
+
+| I want to… | Section | Config key / command |
+|---|---|---|
+| Remove recipes (by id, mod, type, output or input) | [Removing recipes](#removing-recipes) | `recipes.remove` |
+| Swap an ingredient in every recipe | [Replacing ingredients](#replacing-ingredients) | `recipes.replace_ingredients` |
+| Add or override a recipe | [Adding & replacing recipes](#adding--replacing-recipes) | `recipes.add` |
+| Empty, add or extend loot tables | [Loot tables](#loot-tables) | `loot_tables.remove` / `add` / `modify` |
+| Change or delete one item's drops across many tables | [Item rules across tables](#item-rules-across-tables) | `loot_tables.replace_items` / `remove_items` |
+| Remove an item from the game (duplicate items from two mods) | [Disabling items](#disabling-items) | `items.disable` |
+| Stop a tree, plant or ore from generating | [Worldgen features](#worldgen-features) | `worldgen.remove_features` |
+| Edit rituals, enchantments or other datapack registries | [Datapack registries](#datapack-registries) | `registries.remove` / `modify` / `add` |
+| Edit recipes visually | [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) | `/recipeeditor`, `/recipetweaker` |
+| Edit loot tables visually (components included) | [Loot table editor](#loot-table-editor) | `/loottableeditor` |
+| Make a modded recipe type editable | [Editor layouts](#editor-layouts--manual-override) | `config/datarewriter/editor-layouts/` |
+| See what's loaded or what went wrong | [Commands](#commands) · [Troubleshooting](#troubleshooting) | `/datarewriter status`, `/datarewriter errors` |
+| Contribute rules or layouts from another mod | [Addon API](#addon-api) | [`API.md`](API.md) |
+
 ## Contents
 
 [Getting started](#getting-started) · [Config files](#config-files) · [Removing recipes](#removing-recipes) ·
 [Replacing ingredients](#replacing-ingredients) · [Adding & replacing recipes](#adding--replacing-recipes) ·
 [Loot tables](#loot-tables) · [Item rules across tables](#item-rules-across-tables) ·
-[Disabling items](#disabling-items) ·
+[Disabling items](#disabling-items) · [Worldgen features](#worldgen-features) ·
 [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) · [Loot table editor](#loot-table-editor) ·
 [Supported mods](#natively-supported-mods) · [Editor layouts](#editor-layouts--manual-override) ·
 [Datapack registries](#datapack-registries) · [Commands](#commands) · [File locations](#file-locations) ·
@@ -56,10 +75,12 @@ is special (client-side [editor layouts](#editor-layouts--manual-override), not 
     add:    [ /* new loot tables    */ ],
     modify: [ /* loot injections    */ ],
   },
+  items:    { disable: [ /* items taken out of the game */ ] },
+  worldgen: { remove_features: [ /* placed feature ids */ ] },
 }
 ```
 
-Nine operations exist. Recipes and loot tables are rewritten independently, but within `loot_tables`
+Ten operations exist (plus [datapack registries](#datapack-registries), which apply at world load). Recipes and loot tables are rewritten independently, but within `loot_tables`
 the order below is the order they run in — `modify` also sees tables `add` created, and the two item
 rules see everything:
 
@@ -74,6 +95,7 @@ rules see everything:
 | `loot_tables` | [`replace_items`](#item-rules-across-tables) | Swaps what item entries drop, across many tables |
 | `loot_tables` | [`remove_items`](#item-rules-across-tables) | Deletes item entries, across many tables |
 | `items` | [`disable`](#disabling-items) | Takes an item out of the game: recipes, loot, tags, trades, existing stacks, EMI |
+| `worldgen` | [`remove_features`](#worldgen-features) | Stops placed features (trees, plant patches, ores) generating in new chunks |
 
 Rules that match on a `#tag` (and every item rule) are applied once startup or `/reload` has finished
 rather than during loading, because item tags aren't bound yet at that point — the effect is the same.
@@ -295,7 +317,7 @@ For every disabled item, on startup and on each `/reload`:
 |---|---|
 | **Recipes making it** | Removed — judged by the recipe's real result, so modded types and list results (a cutting board's) are covered. Extra results of other recipes get `replace_with`, or leave the result list. |
 | **Recipes using it** | The ingredient becomes `replace_with` (exactly a [`replace_ingredients`](#replacing-ingredients) rule). Without one, recipes that can then only be filled with the disabled item are removed. |
-| **Item tags** | It is taken out of every tag, so `#c:crops/onion` stops offering it to tag recipes, tag loot and EMI. |
+| **Item tags** | It is replaced by `replace_with` in every tag (added once), or just taken out without one — so `#c:crops/onion` offers the survivor to tag recipes, tag loot and EMI. A recipe whose tag ingredient ends up empty (the item was the tag's only member, no replacement) is removed. |
 | **Loot tables** | Its entries drop `replace_with`, or are deleted without one (exactly [`replace_items` / `remove_items`](#item-rules-across-tables), runtime-injected loot included). |
 | **Villagers & wandering traders** | Trades giving or asking for it get `replace_with`, or are dropped — checked when a player opens the trade screen, so saved villagers and modded trade lists are covered too. |
 | **Existing stacks** | Turn into `replace_with` with the same count and components (custom names, enchantments…), or vanish: player inventories right after joining and on every slot change, a container's contents when it is opened, and item entities when they spawn or load. |
@@ -318,6 +340,33 @@ Notes:
 - Stacks inside a container nobody opens stay as they are until someone does, and placed blocks, item
   frames and mob equipment are not converted.
 - Several rules matching the same item: the first one wins.
+- To also stop the disabled crop growing wild, remove its plant patch with
+  [`worldgen.remove_features`](#worldgen-features).
+
+## Worldgen features
+
+`worldgen.remove_features` stops placed features from generating: wild crop patches of a disabled crop,
+a mod's ores, a tree type. Use the placed feature ids (`data/<mod>/worldgen/placed_feature/`), with `*`
+wildcards:
+
+```json5
+{
+  worldgen: {
+    remove_features: [
+      "farmersdelight:patch_wild_onions",
+      "somemod:ore_*",
+    ],
+  },
+}
+```
+
+- It works however the feature got into the biome: biome JSON, Fabric's `BiomeModifications`, or a
+  NeoForge biome modifier.
+- Only **chunks generated from now on** are affected; existing terrain keeps what it has.
+- The feature is skipped in every biome. Features nested inside other features (a tree inside a
+  random selector) are not top-level biome features and are not matched.
+- Changes apply on `/reload` (for the next chunks). An id that matches nothing is logged as a warning
+  when the world first generates terrain; the log also lists every feature it switched off.
 
 ## Datapack registries
 
@@ -770,6 +819,19 @@ DataRewriter targets **1.21.1** specifically, on Fabric and NeoForge: 1.21.2+ re
 internals (`RecipeMap`) and would need a different implementation.
 
 ## Notes for developers
+
+Where things live (all under `common/src/main/java/net/ledok/datarewriter/`):
+
+| Feature | Code |
+|---|---|
+| Config parsing, validation, the generated example | `config/ConfigLoader.java`, rule records in `config/RewriteConfig.java` |
+| Recipe rules (JSON phase, parsed phase, ingredient swaps, disabled-item recipes) | `RecipeRewriter.java`, `mixin/RecipeManagerMixin.java` |
+| Loot rules (JSON phase, post-injection pass, live rebinds) | `LootRewriter.java`, `LootInjectionRewriter.java`, `LootLiveApplier.java` |
+| `items.disable` runtime: lookups, stack and trade conversion, client list | `DisabledItems.java`; mixins `TagLoaderMixin` (tags), `AbstractContainerMenuMixin` (slots), `ServerLevelMixin` / `ItemEntityMixin` (drops), `AbstractVillagerMixin` (trades), `PlayerListMixin` (sync), `CreativeModeTabMixin` + EMI plugin (client hiding) |
+| `worldgen.remove_features` | `RemovedFeatures.java`, `mixin/PlacedFeatureMixin.java` |
+| Datapack registries | `RegistryRewriter.java`, `RegistryLiveApplier.java`, `mixin/RegistryDataLoaderMixin.java` |
+| Editors (client) | `client/gui/` — `RecipeEditorScreen`, `LootTableEditorScreen`, per-mod `*Layouts.java` |
+| Addon API | `api/` — documented in [`API.md`](API.md) |
 
 - MultiLoader layout, same as NPCs_LD: `common/` holds all the code (Mojmap, vanilla-only — no Fabric API
   — including the mixins, which Loom remaps into the Fabric jar); `fabric/` and `neoforge/` are thin glue
