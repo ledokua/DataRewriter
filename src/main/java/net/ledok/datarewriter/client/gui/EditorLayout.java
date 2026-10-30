@@ -169,6 +169,12 @@ public final class EditorLayout {
      */
     public String registryTarget;
     /**
+     * With {@link #registryTarget}: the id box takes a free-form key instead of a resource id (Thaumcraft's
+     * recipe keys, like "ElementalSword"), and Load may switch to whichever of the target's layouts has the
+     * loaded entry's "type" in its {@link #template}.
+     */
+    public boolean keyIds;
+    /**
      * True when the decoration draws its own slot frames, so the editor
      * skips its generic grey slot boxes and result arrow (texture-less
      * layouts only).

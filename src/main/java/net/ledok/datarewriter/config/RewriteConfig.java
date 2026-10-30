@@ -33,10 +33,38 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
                             List<RegistryModification> registryModifications,
                             List<DisabledItem> disabledItems,
                             List<FeatureRemoval> featureRemovals,
+                            List<ThaumcraftRule> thaumcraftRules,
                             int errorCount) {
     public static final RewriteConfig EMPTY =
             new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0);
+
+    /**
+     * The {@code thaumcraft} section: Thaumcraft 4: Reforged's arcane, crucible and infusion recipes, which
+     * live in its own recipe map under string keys ("ElementalSword") instead of the game's recipe manager.
+     * Applied in file order by {@code compat.thaumcraft.ThaumcraftRecipes}; the generic recipe rules
+     * (output/input/type removals, replace_ingredients, items.disable) reach those recipes too.
+     */
+    public sealed interface ThaumcraftRule permits ThaumcraftRemoval, ThaumcraftModification, ThaumcraftAddition {
+        String source();
+    }
+
+    /**
+     * Removes every Thaumcraft recipe matching ALL given conditions: key ('*' wildcards, case-sensitive),
+     * research key, type ("arcane_shaped", "infusion", ...), output item/#tag, input item/#tag.
+     */
+    public record ThaumcraftRemoval(@Nullable String id, @Nullable String research, @Nullable String type,
+                                    @Nullable String output, @Nullable String input, String source)
+            implements ThaumcraftRule {
+    }
+
+    /** Deep-merges {@code merge} into every recipe whose key matches {@code id} ('*' wildcards). */
+    public record ThaumcraftModification(String id, JsonObject merge, String source) implements ThaumcraftRule {
+    }
+
+    /** A new recipe, or a replacement for the one with the same key; {@code json} is DataRewriter's format. */
+    public record ThaumcraftAddition(String id, JsonObject json, String source) implements ThaumcraftRule {
+    }
 
     /**
      * {@code worldgen.remove_features}: placed features matching {@code feature} ('*' wildcards) stop

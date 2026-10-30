@@ -120,6 +120,32 @@ public final class GuiRecipeSaver {
     }
 
     /**
+     * Saves a Thaumcraft recipe from the editor into the file's {@code thaumcraft.add} list, replacing an
+     * earlier entry with the same key. The JSON was validated already. Returns an error message or null.
+     */
+    public static String saveThaumcraft(String key, JsonObject recipe) {
+        JsonObject root;
+        try {
+            root = readRoot();
+        } catch (IOException e) {
+            return e.getMessage();
+        }
+        JsonObject section = root.get("thaumcraft") instanceof JsonObject existing ? existing : new JsonObject();
+        root.add("thaumcraft", section);
+        JsonArray add = section.get("add") instanceof JsonArray a ? a : new JsonArray();
+        section.add("add", add);
+        add.asList().removeIf(e -> e instanceof JsonObject obj && obj.get("id") instanceof JsonPrimitive p
+                && p.isString() && p.getAsString().equals(key));
+        add.add(recipe);
+        try {
+            writeRoot(root);
+        } catch (IOException e) {
+            return e.getMessage();
+        }
+        return null;
+    }
+
+    /**
      * Appends a bulk removal rule — {output: ref} or {input: ref} — to the
      * recipes section (append-unique). Returns an error message or null.
      */

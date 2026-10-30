@@ -50,7 +50,7 @@ public final class ConfigLoader {
             error("Could not create config directory {}: {}", dir, e.getMessage());
             lastIssues = List.copyOf(issues);
             return new RewriteConfig(List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 1);
         }
 
         List<RewriteConfig.RemovalRule> removals = new ArrayList<>();
@@ -66,6 +66,7 @@ public final class ConfigLoader {
         List<RewriteConfig.RegistryModification> registryModifications = new ArrayList<>();
         List<RewriteConfig.DisabledItem> disabledItems = new ArrayList<>();
         List<RewriteConfig.FeatureRemoval> featureRemovals = new ArrayList<>();
+        List<RewriteConfig.ThaumcraftRule> thaumcraftRules = new ArrayList<>();
 
         // editor-layouts/ holds the recipe editor's CLIENT-side layout files,
         // which are not rewrite rules.
@@ -88,14 +89,16 @@ public final class ConfigLoader {
                 int registryBefore = registryRemovals.size() + registryAdditions.size()
                         + registryModifications.size();
                 int itemsBefore = disabledItems.size() + featureRemovals.size();
+                int thaumcraftBefore = thaumcraftRules.size();
                 String name = dir.relativize(file).toString().replace('\\', '/');
                 loadFile(name, file,
                         removals, additions, ingredientReplacements, lootRemovals,
                         lootAdditions, lootModifications, lootItemReplacements, lootItemRemovals,
                         registryRemovals, registryAdditions, registryModifications, disabledItems,
-                        featureRemovals);
+                        featureRemovals, thaumcraftRules);
                 summaries.add(new FileSummary(name,
-                        removals.size() + additions.size() + ingredientReplacements.size() - recipeBefore,
+                        removals.size() + additions.size() + ingredientReplacements.size() - recipeBefore
+                                + thaumcraftRules.size() - thaumcraftBefore,
                         lootRemovals.size() + lootAdditions.size() + lootModifications.size()
                                 + lootItemReplacements.size() + lootItemRemovals.size() - lootBefore,
                         registryRemovals.size() + registryAdditions.size()
@@ -127,6 +130,7 @@ public final class ConfigLoader {
                 registryModifications.addAll(part.registryModifications());
                 disabledItems.addAll(part.disabledItems());
                 featureRemovals.addAll(part.featureRemovals());
+                thaumcraftRules.addAll(part.thaumcraftRules());
                 summaries.add(new FileSummary(name,
                         part.removals().size() + part.additions().size() + part.ingredientReplacements().size(),
                         part.lootRemovals().size() + part.lootAdditions().size() + part.lootModifications().size()
@@ -153,7 +157,7 @@ public final class ConfigLoader {
                 List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                 List.copyOf(registryRemovals), List.copyOf(registryAdditions),
                 List.copyOf(registryModifications), List.copyOf(validDisabled), List.copyOf(featureRemovals),
-                errors);
+                List.copyOf(thaumcraftRules), errors);
     }
 
     /**
@@ -271,7 +275,8 @@ public final class ConfigLoader {
                                  List<RewriteConfig.RegistryAddition> registryAdditions,
                                  List<RewriteConfig.RegistryModification> registryModifications,
                                  List<RewriteConfig.DisabledItem> disabledItems,
-                                 List<RewriteConfig.FeatureRemoval> featureRemovals) {
+                                 List<RewriteConfig.FeatureRemoval> featureRemovals,
+                                 List<RewriteConfig.ThaumcraftRule> thaumcraftRules) {
         JsonObject root;
         try {
             String content = stripCommentsAndTrailingCommas(Files.readString(file));
@@ -329,12 +334,20 @@ public final class ConfigLoader {
             }
         }
 
+        if (root.has("thaumcraft")) {
+            if (root.get("thaumcraft") instanceof JsonObject thaumcraft) {
+                readThaumcraftSection(thaumcraft, fileName, thaumcraftRules);
+            } else {
+                error("[{}] 'thaumcraft' must be an object with 'remove', 'modify' and/or 'add' lists", fileName);
+            }
+        }
+
         for (String key : root.keySet()) {
             if (key.equals("remove") || key.equals("add")) {
                 error("[{}] '{}' must be inside a 'recipes: { ... }' section, ignoring it", fileName, key);
-            } else if (!List.of("recipes", "loot_tables", "registries", "items", "worldgen").contains(key)) {
-                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables', 'registries', 'items' "
-                        + "or 'worldgen')", fileName, key);
+            } else if (!List.of("recipes", "loot_tables", "registries", "items", "worldgen", "thaumcraft").contains(key)) {
+                warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables', 'registries', 'items', "
+                        + "'worldgen' or 'thaumcraft')", fileName, key);
             }
         }
     }
@@ -367,6 +380,79 @@ public final class ConfigLoader {
                 continue;
             }
             featureRemovals.add(new RewriteConfig.FeatureRemoval(pattern, fileName));
+        }
+    }
+
+    /**
+     * thaumcraft: { remove: [ "Key", { id, research, type, output, input } ],
+     * modify: [ { id, merge: {...} } ], add: [ { id, type, ... } ] }. The recipe JSON itself is checked
+     * when the rules are applied (it needs Thaumcraft's classes); here only the rule shapes.
+     */
+    private static void readThaumcraftSection(JsonObject section, String fileName,
+                                              List<RewriteConfig.ThaumcraftRule> rules) {
+        for (String key : section.keySet()) {
+            if (!List.of("remove", "modify", "add").contains(key)) {
+                warn("[{}] thaumcraft: unknown key '{}' (expected 'remove', 'modify' or 'add')", fileName, key);
+            }
+        }
+        if (section.get("remove") instanceof JsonArray remove) {
+            for (int index = 0; index < remove.size(); index++) {
+                JsonElement element = remove.get(index);
+                if (element instanceof JsonPrimitive p && p.isString()) {
+                    rules.add(new RewriteConfig.ThaumcraftRemoval(p.getAsString(), null, null, null, null, fileName));
+                    continue;
+                }
+                if (!(element instanceof JsonObject obj)) {
+                    error("[{}] thaumcraft remove[{}] must be a recipe key or an object", fileName, index);
+                    continue;
+                }
+                for (String key : obj.keySet()) {
+                    if (!List.of("id", "research", "type", "output", "input").contains(key)) {
+                        warn("[{}] thaumcraft remove[{}]: unknown key '{}'", fileName, index, key);
+                    }
+                }
+                String output = obj.has("output") ? normalizeItemOrTag(readString(obj, "output")) : null;
+                String input = obj.has("input") ? normalizeItemOrTag(readString(obj, "input")) : null;
+                if ((obj.has("output") && output == null) || (obj.has("input") && input == null)) {
+                    error("[{}] thaumcraft remove[{}]: output/input must be an item id or #tag", fileName, index);
+                    continue;
+                }
+                RewriteConfig.ThaumcraftRemoval rule = new RewriteConfig.ThaumcraftRemoval(readString(obj, "id"),
+                        readString(obj, "research"), readString(obj, "type"), output, input, fileName);
+                if (rule.id() == null && rule.research() == null && rule.type() == null && output == null
+                        && input == null) {
+                    error("[{}] thaumcraft remove[{}] has no conditions, skipping (it would remove every "
+                            + "Thaumcraft recipe)", fileName, index);
+                    continue;
+                }
+                rules.add(rule);
+            }
+        } else if (section.has("remove")) {
+            error("[{}] thaumcraft 'remove' must be a list", fileName);
+        }
+        if (section.get("modify") instanceof JsonArray modify) {
+            for (int index = 0; index < modify.size(); index++) {
+                if (!(modify.get(index) instanceof JsonObject obj) || readString(obj, "id") == null
+                        || !(obj.get("merge") instanceof JsonObject merge)) {
+                    error("[{}] thaumcraft modify[{}] must be {{ id: \"Key\", merge: {{ ... }} }}", fileName, index);
+                    continue;
+                }
+                rules.add(new RewriteConfig.ThaumcraftModification(readString(obj, "id"), merge.deepCopy(), fileName));
+            }
+        } else if (section.has("modify")) {
+            error("[{}] thaumcraft 'modify' must be a list", fileName);
+        }
+        if (section.get("add") instanceof JsonArray add) {
+            for (int index = 0; index < add.size(); index++) {
+                if (!(add.get(index) instanceof JsonObject obj) || readString(obj, "id") == null
+                        || readString(obj, "type") == null) {
+                    error("[{}] thaumcraft add[{}] needs an 'id' (the recipe key) and a 'type'", fileName, index);
+                    continue;
+                }
+                rules.add(new RewriteConfig.ThaumcraftAddition(readString(obj, "id"), obj.deepCopy(), fileName));
+            }
+        } else if (section.has("add")) {
+            error("[{}] thaumcraft 'add' must be a list", fileName);
         }
     }
 
@@ -1214,6 +1300,19 @@ public final class ConfigLoader {
             //   remove_features: [
             //     "farmersdelight:patch_wild_onions",
             //     "somemod:ore_*",
+            //   ],
+            // },
+
+            // ---- Thaumcraft 4: Reforged ------------------------------------------------
+            // Its arcane, crucible and infusion recipes, by key ("ElementalSword"). The
+            // README's "Thaumcraft recipes" section lists every field.
+            //
+            // thaumcraft: {
+            //   remove: [ "ElementalSword", { research: "ALUMENTUM" } ],
+            //   modify: [ { id: "ElementalAxe", merge: { aspects: { ignis: 32 } } } ],
+            //   add: [
+            //     { id: "MySlime", type: "crucible", research: "", result: "minecraft:slime_ball",
+            //       catalyst: "#c:slime_balls", aspects: "aqua:2, victus:1" },
             //   ],
             // },
 

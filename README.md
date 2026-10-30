@@ -23,6 +23,7 @@ whole items out of the game and switch off worldgen features.
 | Remove an item from the game (duplicate items from two mods) | [Disabling items](#disabling-items) | `items.disable` |
 | Stop a tree, plant or ore from generating | [Worldgen features](#worldgen-features) | `worldgen.remove_features` |
 | Edit rituals, enchantments or other datapack registries | [Datapack registries](#datapack-registries) | `registries.remove` / `modify` / `add` |
+| Change Thaumcraft's arcane, crucible or infusion recipes | [Thaumcraft recipes](#thaumcraft-recipes) | `thaumcraft.remove` / `modify` / `add` |
 | Edit recipes visually | [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) | `/recipeeditor`, `/recipetweaker` |
 | Edit loot tables visually (components included) | [Loot table editor](#loot-table-editor) | `/loottableeditor` |
 | Make a modded recipe type editable | [Editor layouts](#editor-layouts--manual-override) | `config/datarewriter/editor-layouts/` |
@@ -37,7 +38,7 @@ whole items out of the game and switch off worldgen features.
 [Disabling items](#disabling-items) · [Worldgen features](#worldgen-features) ·
 [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) · [Loot table editor](#loot-table-editor) ·
 [Supported mods](#natively-supported-mods) · [Editor layouts](#editor-layouts--manual-override) ·
-[Datapack registries](#datapack-registries) · [Commands](#commands) · [File locations](#file-locations) ·
+[Datapack registries](#datapack-registries) · [Thaumcraft recipes](#thaumcraft-recipes) · [Commands](#commands) · [File locations](#file-locations) ·
 [Troubleshooting](#troubleshooting) ·
 [Addon API](#addon-api) · [Compatibility](#compatibility) · [Notes for developers](#notes-for-developers)
 
@@ -95,6 +96,7 @@ rules see everything:
 | `loot_tables` | [`remove_items`](#item-rules-across-tables) | Deletes item entries, across many tables |
 | `items` | [`disable`](#disabling-items) | Takes an item out of the game: recipes, loot, tags, trades, existing stacks, EMI |
 | `worldgen` | [`remove_features`](#worldgen-features) | Stops placed features (trees, plant patches, ores) generating in new chunks |
+| `thaumcraft` | [`remove`, `modify`, `add`](#thaumcraft-recipes) | Thaumcraft 4: Reforged's arcane, crucible, infusion and infusion-enchantment recipes |
 
 Rules that match on a `#tag` (and every item rule) are applied once startup or `/reload` has finished
 rather than during loading, because item tags aren't bound yet at that point — the effect is the same.
@@ -407,6 +409,71 @@ Two things set these rules apart from everything else in this file:
 The generated `example.json5` documents the shapes; ritual editing also has
 [its own GUI](#hephaestus-forge-rituals-forbidden-arcanus).
 
+## Thaumcraft recipes
+
+With [Thaumcraft 4: Reforged](https://github.com/ArchiJK/Thaumcraft-4.2.3.5) installed, its own recipe kinds can be
+changed too. Its crafting-table recipes are ordinary datapack recipes (everything above applies to them),
+but arcane, crucible, infusion and infusion-enchantment recipes live in Thaumcraft's own list under string
+**keys** (`ElementalSword`, `Thaumometer`, `ConfigResearch.RunicAugment0`). The `thaumcraft` section works
+on those:
+
+```json5
+{
+  thaumcraft: {
+    remove: [
+      "ElementalSword",                         // one recipe by key ('*' wildcards; keys are case-sensitive)
+      { research: "ALUMENTUM" },                // every recipe a research unlocks
+      { type: "crucible", output: "minecraft:slime_ball" },  // conditions combine (AND); input works too
+    ],
+    modify: [
+      // "merge" is merged into the recipe's JSON (below): objects merge deeper, null deletes a key.
+      { id: "ElementalAxe", merge: { aspects: { ignis: 32 }, instability: 2 } },
+    ],
+    add: [
+      // A new key adds a recipe, an existing one replaces it.
+      { id: "MyWand", type: "arcane_shaped", research: "BASICARTIFACE",
+        result: { id: "thaumcraft:wand", count: 1 }, aspects: { aer: 5, ordo: 5 },
+        pattern: [" C", "R "], key: { C: "thaumcraft:iron_wand_cap", R: "minecraft:stick" } },
+      { id: "MySlime", type: "crucible", research: "", result: "minecraft:slime_ball",
+        catalyst: "#c:slime_balls", aspects: "aqua:2, victus:1" },
+      { id: "MyStar", type: "infusion", research: "", result: "minecraft:nether_star", instability: 3,
+        aspects: { ordo: 16 }, central: "minecraft:diamond_block",
+        components: ["minecraft:emerald", "#c:ingots/gold"] },
+    ],
+  },
+}
+```
+
+| Type | Fields |
+|---|---|
+| `arcane_shaped` | `result`, `aspects` (vis), `pattern` (up to 3×3) + `key` |
+| `arcane_shapeless` | `result`, `aspects`, `ingredients` |
+| `crucible` | `result`, `aspects` (essentia), `catalyst` |
+| `infusion` | `result`, `aspects`, `instability`, `central`, `components` |
+| `infusion_enchantment` | `enchantment` (an id), `aspects`, `instability`, `components` |
+
+Every type also has `research` (the research key that unlocks it; `""` = always). Aspects are
+`{ aer: 5, ignis: 3 }` or the string `"aer:5, ignis:3"`. An ingredient is `"mod:item"`, `"#mod:tag"`, a
+list of those (any one fits), or `{ id, count, aspects, data }` for items whose aspects or wand parts
+matter (`data: { cap: "...", rod: "..." }` for wands). A result is `"mod:item"` or the same object.
+Crafting-table references and multiblock ("compound") recipes can only be removed.
+
+The general recipe rules reach these recipes as well: `recipes.remove` with `output` / `input` / `type`
+(`type: "thaumcraft:infusion"`, …; rules with an `id` don't, since Thaumcraft keys aren't ids),
+`replace_ingredients`, and [`items.disable`](#disabling-items) (recipes making a disabled item go or are
+redirected, ingredients get the replacement).
+
+- **Applied** on server start and `/reload`, after Thaumcraft registered its recipes. Each time the list
+  starts again from Thaumcraft's own recipes, so removing a rule brings the recipe back.
+- **Clients with DataRewriter** get the changes on join and `/reload`, so EMI/JEI and the Thaumonomicon match
+  the server. Clients without it still show Thaumcraft's original recipes (crafting follows the server).
+- **The Thaumonomicon** shows research pages, not lists: a removed recipe's page stays empty, and added
+  recipes have no page — they're craftable (once their research is done) and show in EMI/JEI.
+- **The recipe editor** (`/recipeeditor`) has layouts for all five types: type the key and press **Load** to
+  edit an existing recipe, **Save** writes it to `gui-recipes.json5` (`thaumcraft.add`) and applies it at
+  once (`/datarewriter reload` refreshes everyone's recipe viewers). Items whose aspects or wand parts
+  matter (crystals, wands) load as the plain item — edit those recipes in the config file.
+
 ## In-game editors
 
 These screens do everything the config files do, without writing JSON. They are **client-side**: only
@@ -602,6 +669,7 @@ automatically when that mod is installed; nothing is required at runtime.
 | Mystical Agriculture | `infusion`, `awakening`, `enchanter`, `reprocessor`, `soul_extraction`, `soulium_spawner` | drawn on the mod's own JEI panels: the two altars keep their ring (infusion: seed + up to 8 pedestal items; awakening: the four corner slots are the essence vessel *stacks* with counts, the edges the pedestal items); enchanter takes two counted ingredients + the enchantment id; soul extraction pairs an input with the mob soul type id and a souls amount; soulium spawner takes a counted input and up to four weighted entity ids as fields. The mod's own seed recipes use its dynamic `crop_component` ingredients — those load with empty slots (recipes you make here use plain items/`#tags`, which work just the same). `farmland_till` and `soul_jar_empty` are special crafting behaviors with dynamic ingredients, hidden from the type picker. NeoForge-only, like the mod itself. |
 | Eidolon Repraised | `worktable`, `crucible`, the five `ritual_brazier*` types, `athame_foraging`, `chant_conversion`, `dye` | drawn on the mod's codex pages: worktable is a 3×3 shaped grid *plus* the four corner reagents (saved as extra key letters + the `reagents` row); crucible takes up to 4 steps of up to 4 items with a stirs count per step (two of the mod's own recipes exceed 4 items in a step and load truncated); brazier rituals share the reagent + pedestal arc + focus slot, with the variant's own extras (crafted result, summoned entity, commands, ritual id + invariant item, or structure). The mod's worktable recipes can't be re-encoded by the game, so the Load/EMI fill starts that one from scratch. `chant`/`command_chant` (sign sequences) are hidden — JSON-only. NeoForge-only, like the mod itself. |
 | Malum | `spirit_infusion`, `soul_binding`, `runeworking`, `spirit_focusing`, `spirit_repair`, `unchained_transmutation`, `void_favor`, `node_smelting`, `node_blasting` | drawn on the mod's JEI codex pages. Spirit slots take the spirit *items* and save them as spirit type ids with counts; sized ingredients take counts via scroll and `#tags`. Infusion/soul binding: spirits down one side, extra inputs down the other (binding's result is a geas effect id field); runeworking includes the rune sound id; focusing has time + durability cost; repair takes the repair material, up to six repairable items (the mod's longest lists reach twelve — those load truncated) and the repair percentage, with no result (it's derived); the node types are furnace recipes whose output is an ingredient (tags allowed) plus an output count. `conjuncture_crystallarium` and `ore_derealization` (block-state/world-rule data) are hidden — JSON-only. NeoForge-only, like the mod itself. |
+| Thaumcraft 4: Reforged | `arcane_shaped`, `arcane_shapeless`, `crucible`, `infusion`, `infusion_enchantment` | not game recipes but [Thaumcraft's own list](#thaumcraft-recipes): the id box takes the recipe key and **Load** fetches it from the server (switching to its type's layout); arcane gets the 3×3 grid, infusion the central slot and a ring of twelve pedestals; research, instability and aspects (`aer:5, ignis:3`) are fields. Saves go to `thaumcraft.add`. |
 | Create (6.x, Fabric port) | `mixing`, `compacting`, `crushing`, `milling`, `pressing`, `cutting`, `deploying`, `item_application`, `filling`, `emptying`, `splashing`, `haunting`, `sandpaper_polishing`, `mechanical_crafting` | drawn like Create's own EMI recipe views: the same slot positions, arrows and slot frames, and the animated machines (mixer, press, crushing wheels, saw, deployer, spout with its fluid stream, drain, fan, millstone, crafter, blaze burner when heat is set). Fluid ingredients/results are proper fluid slots (`#fluid tags` allowed for inputs; amounts in mB, scroll or middle-click), results take drop chances (Alt+scroll; chance slots get Create's dotted frame), basins have `Heat` (`none`/`heated`/`superheated`) and `Time (ticks)` fields, deploying/item application `Keep held item`, mechanical crafting a 9×9 grid — Create raises vanilla's 3×3 pattern cap that far, and empty rows/columns are trimmed on save, so a 2×2 recipe drawn anywhere in the grid stays 2×2 — with `Accept mirrored`. Loading a Create recipe from EMI fills item and fluid slots correctly even though Create keeps both in one list. Not covered: `sequenced_assembly` (nested step recipes — write those in JSON). |
 
 ### Hephaestus forge rituals (Forbidden Arcanus)
@@ -856,14 +924,16 @@ Where things live (all under `src/main/java/net/ledok/datarewriter/`):
 | `worldgen.remove_features` | `RemovedFeatures.java`, `mixin/PlacedFeatureMixin.java` |
 | Datapack registries | `RegistryRewriter.java`, `RegistryLiveApplier.java`; mixins `RegistryDataLoaderMixin` (start of a load), `PendingRegistrationMixin` (remove / rewrite one entry), `RegistryLoadTaskMixin` + `ResourceManagerRegistryLoadTaskMixin` (additions) |
 | Editors (client) | `client/gui/` — `RecipeEditorScreen`, `LootTableEditorScreen`, per-mod `*Layouts.java`; client recipe list in `client/ClientRecipes.java` |
+| Thaumcraft integration (rules, client sync, editor save/load) | `compat/thaumcraft/` — `ThaumcraftRecipes` (rewrites `TcRecipes`' map by reflection, keeps Thaumcraft's originals, computes the client diff), `TcJson` (the JSON form), `ThaumcraftCompat` (guarded entry points), `ThaumcraftClient`; `network/ThaumcraftRecipesPayload`; layouts in `client/gui/ThaumcraftLayouts` (registry-target path with `EditorLayout.keyIds`) |
 | Addon API | `api/` — documented in [`API.md`](API.md) |
 
 - NeoForge-only standalone build (ModDevGradle 2.0.148, Java 25): `src/` holds everything; `neoforge/`
   (the `@Mod` classes, payloads, events) is the loader glue, and the `Platform` / `Network` ServiceLoader
   interfaces stay so code can move between this branch and `multiloader` unchanged.
   `./gradlew build` → `build/libs/DataRewriter-neoforge-<version>+26.1.2.jar`; `runClient` / `runServer`
-  use `run/` and `run-server/`. EMI Continued is compile-only from a local jar (`emi_jar` in
-  `gradle.properties`) until it is on a Maven.
+  use `run/` and `run-server/`. EMI Continued comes from Maven Local (`dev.emi:emi-continued-neoforge`,
+  published by the EMI checkout) until it is on a Maven; Thaumcraft 4: Reforged is compile-only from its
+  local release jar (`thaumcraft_jar`) and joins the dev runs with TerraBlender when that jar exists.
 - Order of a (re)load on 26.1: server tags load **first** (`TagLoader.loadTagsForExistingRegistries`, where
   the config is re-read and item tags are pruned for `items.disable`), then loot tables, then recipes. On a
   world start the datapack registries load before all of that (`RegistryDataLoader.load`, which re-reads the

@@ -33,6 +33,7 @@ public final class RewriteState {
     public static volatile int recipesAdded;
     public static volatile int recipesReplaced;
     public static volatile int recipesDisabled;
+    public static volatile int thaumcraftChanged;
     public static volatile int lootRemoved;
     public static volatile int lootAdded;
     public static volatile int lootReplaced;
@@ -129,7 +130,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(), List.copyOf(rules),
                 old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.thaumcraftRules(), old.errorCount());
     }
 
     /** Same as {@link #appendLootItemReplacement} for remove_items rules. */
@@ -140,7 +141,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), List.copyOf(rules), old.registryRemovals(),
-                old.registryAdditions(), old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
+                old.registryAdditions(), old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.thaumcraftRules(), old.errorCount());
     }
 
     /**
@@ -156,7 +157,21 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(),
-                List.copyOf(rules), old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
+                List.copyOf(rules), old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.thaumcraftRules(), old.errorCount());
+    }
+
+    /** Same mirroring for a Thaumcraft recipe the editor just saved (an addition replaces one with its key). */
+    public static synchronized void appendThaumcraftAddition(RewriteConfig.ThaumcraftAddition rule) {
+        RewriteConfig old = config();
+        List<RewriteConfig.ThaumcraftRule> rules = new ArrayList<>(old.thaumcraftRules());
+        rules.removeIf(existing -> existing instanceof RewriteConfig.ThaumcraftAddition addition
+                && addition.id().equals(rule.id()) && addition.source().equals(rule.source()));
+        rules.add(rule);
+        config = new RewriteConfig(old.removals(), old.additions(), old.ingredientReplacements(),
+                old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
+                old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(),
+                old.registryAdditions(), old.registryModifications(), old.disabledItems(), old.featureRemovals(),
+                List.copyOf(rules), old.errorCount());
     }
 
     /** Same mirroring for a recipe removal rule the GUI just saved. */
@@ -167,7 +182,7 @@ public final class RewriteState {
         config = new RewriteConfig(List.copyOf(rules), old.additions(), old.ingredientReplacements(),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.thaumcraftRules(), old.errorCount());
     }
 
     /** Same mirroring for a replace_ingredients rule the GUI just saved. */
@@ -178,7 +193,7 @@ public final class RewriteState {
         config = new RewriteConfig(old.removals(), old.additions(), List.copyOf(rules),
                 old.lootRemovals(), old.lootAdditions(), old.lootModifications(),
                 old.lootItemReplacements(), old.lootItemRemovals(), old.registryRemovals(), old.registryAdditions(),
-                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.errorCount());
+                old.registryModifications(), old.disabledItems(), old.featureRemovals(), old.thaumcraftRules(), old.errorCount());
     }
 
     /**
@@ -195,7 +210,8 @@ public final class RewriteState {
         boolean registriesInUse = !loaded.registryRemovals().isEmpty()
                 || !loaded.registryAdditions().isEmpty() || !loaded.registryModifications().isEmpty();
         boolean itemsInUse = !loaded.disabledItems().isEmpty();
-        if (!recipesInUse && !lootInUse && !registriesInUse && !itemsInUse && loaded.errorCount() == 0
+        boolean thaumcraftInUse = thaumcraftChanged > 0 || !loaded.thaumcraftRules().isEmpty();
+        if (!recipesInUse && !lootInUse && !registriesInUse && !itemsInUse && !thaumcraftInUse && loaded.errorCount() == 0
                 && externallyChangedFiles.isEmpty()) {
             return; // mod not in use, stay quiet
         }
@@ -234,6 +250,12 @@ public final class RewriteState {
             }
             text.append(String.format("items: %d disabled (%d recipes making or needing them removed)",
                     DisabledItems.count(), recipesDisabled));
+        }
+        if (thaumcraftInUse) {
+            if (!text.isEmpty()) {
+                text.append("; ");
+            }
+            text.append("Thaumcraft recipes: ").append(thaumcraftChanged).append(" changed");
         }
         if (registriesInUse) {
             if (!text.isEmpty()) {

@@ -403,8 +403,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     private EditBox idBox(int x, int y, int boxW) {
         EditBox box = new EditBox(font, x, y, boxW, 18, Component.literal("Recipe id"));
         box.setMaxLength(256);
-        box.setHint(Component.literal("recipe id (optional — use an existing id to replace it)")
-                .withStyle(ChatFormatting.DARK_GRAY));
+        box.setHint(Component.literal(layout.keyIds ? "recipe key, like ElementalSword"
+                : layout.registryTarget != null ? "entry id, like mypack:my_ritual"
+                : "recipe id (optional — use an existing id to replace it)").withStyle(ChatFormatting.DARK_GRAY));
         box.setValue(idText);
         box.setResponder(text -> idText = text);
         return box;
@@ -1029,9 +1030,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
         if (layout.registryTarget != null) {
             String entryId = idText.trim();
-            if (Identifier.tryParse(entryId) == null || entryId.isEmpty()) {
-                status = Component.literal("Give the entry an id first (like mypack:my_ritual).")
-                        .withStyle(ChatFormatting.RED);
+            if (!validEntryId(entryId)) {
+                status = Component.literal(layout.keyIds ? "Give the recipe a key first (like ElementalSword)."
+                        : "Give the entry an id first (like mypack:my_ritual).").withStyle(ChatFormatting.RED);
                 return;
             }
             if (!Network.INSTANCE.canSendToServer(RegistryPayloads.SaveEntry.TYPE)) {
@@ -1417,8 +1418,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     private Button loadEntryButton(int x, int y, int width) {
         return Button.builder(Component.literal("Load"), b -> {
             String entryId = idText.trim();
-            if (Identifier.tryParse(entryId) == null || entryId.isEmpty()) {
-                status = Component.literal("Type the entry's id first (like forbidden_arcanus:boss_catcher).")
+            if (!validEntryId(entryId)) {
+                status = Component.literal(layout.keyIds ? "Type the recipe's key first (like ElementalSword)."
+                        : "Type the entry's id first (like forbidden_arcanus:boss_catcher).")
                         .withStyle(ChatFormatting.RED);
                 return;
             }
@@ -1432,13 +1434,20 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }).bounds(x, y, width, 20).build();
     }
 
+    /** A registry entry id, or any non-blank key for {@link EditorLayout#keyIds} layouts. */
+    private boolean validEntryId(String entryId) {
+        return !entryId.isEmpty() && (layout.keyIds || Identifier.tryParse(entryId) != null);
+    }
+
     /** The server's answer to {@link #loadEntryButton}: the entry's JSON, or "" when it doesn't exist. */
     public void onRegistryEntry(String registry, String entryId, String json) {
         if (layout.registryTarget == null || !layout.registryTarget.equals(registry)) {
             return;
         }
         if (json.isEmpty()) {
-            status = Component.literal("No entry '" + entryId + "' in " + registry + " on this server.")
+            status = Component.literal(layout.keyIds
+                    ? "No recipe '" + entryId + "' this editor can load on this server (keys are case-sensitive)."
+                    : "No entry '" + entryId + "' in " + registry + " on this server.")
                     .withStyle(ChatFormatting.RED);
             return;
         }
@@ -1451,6 +1460,17 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         if (parsed == null) {
             status = Component.literal("The server sent an unreadable entry.").withStyle(ChatFormatting.RED);
             return;
+        }
+        if (layout.keyIds && parsed.get("type") instanceof JsonPrimitive type) {
+            // One target, several layouts (Thaumcraft's recipe kinds): show the entry on its own one.
+            for (EditorLayout candidate : layouts) {
+                if (registry.equals(candidate.registryTarget) && candidate.template != null
+                        && type.equals(candidate.template.get("type"))) {
+                    layout = candidate;
+                    lastTypeId = candidate.typeId;
+                    break;
+                }
+            }
         }
         clearSlots();
         if (layout.prepareLoad != null) {

@@ -1,6 +1,7 @@
 package net.ledok.datarewriter;
 
 import net.ledok.datarewriter.api.DataRewriterEvents;
+import net.ledok.datarewriter.compat.thaumcraft.ThaumcraftCompat;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -32,6 +33,7 @@ public final class Datarewriter {
      */
     public static void onServerStarted(MinecraftServer server) {
         RecipeRewriter.applyParsedRules(server);
+        ThaumcraftCompat.apply(server);
         LootInjectionRewriter.apply(server);
         RewriteState.missingConfigTables(server);
         DataRewriterEvents.fireRecipesChanged(server);
@@ -41,6 +43,7 @@ public final class Datarewriter {
     /** A successful {@code /reload}: the same passes, then a chat summary for online operators. */
     public static void onDataPackReloaded(MinecraftServer server) {
         RecipeRewriter.applyParsedRules(server);
+        ThaumcraftCompat.apply(server);
         LootInjectionRewriter.apply(server);
         RewriteState.announce(server);
         DataRewriterEvents.fireRecipesChanged(server);

@@ -1,5 +1,8 @@
 package net.ledok.datarewriter.network;
 
+import net.ledok.datarewriter.api.DataRewriterEvents;
+import net.ledok.datarewriter.config.GuiRecipeSaver;
+import net.ledok.datarewriter.compat.thaumcraft.ThaumcraftCompat;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.ledok.datarewriter.Datarewriter;
@@ -27,6 +30,12 @@ public final class RegistryEditNetworking {
     /** {@code EntryRequest}: one entry's JSON for the editor's Load button. */
     public static void handleEntryRequest(MinecraftServer server, ServerPlayer player,
                                           RegistryPayloads.EntryRequest payload) {
+        if (payload.registry().equals(ThaumcraftCompat.EDITOR_TARGET)) {
+            JsonObject recipe = ThaumcraftCompat.encode(payload.entryId());
+            Network.INSTANCE.sendToPlayer(player, new RegistryPayloads.EntryContent(
+                    payload.registry(), payload.entryId(), recipe == null ? "" : recipe.toString()));
+            return;
+        }
         Identifier registry = Identifier.tryParse(payload.registry());
         Identifier id = Identifier.tryParse(payload.entryId());
         JsonObject json = registry == null || id == null ? null
@@ -40,6 +49,10 @@ public final class RegistryEditNetworking {
                                   RegistryPayloads.SaveEntry payload) {
         if (!Datarewriter.isEditor(player)) {
             fail(player, "you need to be an operator (permission level 2) on this server");
+            return;
+        }
+        if (payload.registry().equals(ThaumcraftCompat.EDITOR_TARGET)) {
+            saveThaumcraft(server, player, payload);
             return;
         }
         Identifier registry = Identifier.tryParse(payload.registry());
@@ -80,6 +93,48 @@ public final class RegistryEditNetworking {
         succeed(player, "Entry " + id + " saved to config/datarewriter/" + GuiRegistrySaver.FILE_NAME
                 + " on the server and applied live. Other players' recipe viewers (JEI) show it after"
                 + " they rejoin the world.");
+    }
+
+    /** A Thaumcraft recipe from the editor: validate, persist under thaumcraft.add, apply and sync live. */
+    private static void saveThaumcraft(MinecraftServer server, ServerPlayer player,
+                                       RegistryPayloads.SaveEntry payload) {
+        String key = payload.entryId().trim();
+        if (key.isEmpty()) {
+            fail(player, "give the recipe a key first (like ElementalSword)");
+            return;
+        }
+        JsonObject recipe;
+        try {
+            recipe = JsonParser.parseString(payload.json()) instanceof JsonObject obj ? obj : null;
+        } catch (Exception e) {
+            recipe = null;
+        }
+        if (recipe == null) {
+            fail(player, "the recipe must be a JSON object");
+            return;
+        }
+        // The key leads the entry, like hand-written ones.
+        JsonObject entry = new JsonObject();
+        entry.addProperty("id", key);
+        recipe.remove("id");
+        recipe.entrySet().forEach(e -> entry.add(e.getKey(), e.getValue()));
+        String error = ThaumcraftCompat.validate(entry);
+        if (error == null) {
+            error = GuiRecipeSaver.saveThaumcraft(key, entry);
+        }
+        if (error != null) {
+            fail(player, error);
+            return;
+        }
+        RewriteState.appendThaumcraftAddition(new RewriteConfig.ThaumcraftAddition(key, entry.deepCopy(),
+                GuiRecipeSaver.FILE_NAME));
+        ThaumcraftCompat.apply(server);
+        ThaumcraftCompat.sync(server.getPlayerList().getPlayers());
+        DataRewriterEvents.fireRecipesChanged(server);
+        Datarewriter.LOGGER.info("Recipe editor: Thaumcraft recipe {} saved and applied (by {})", key,
+                player.getGameProfile().name());
+        succeed(player, "Thaumcraft recipe " + key + " saved to config/datarewriter/" + GuiRecipeSaver.FILE_NAME
+                + " on the server and applied live. Recipe viewers show it after /datarewriter reload.");
     }
 
     private static void fail(ServerPlayer player, String message) {

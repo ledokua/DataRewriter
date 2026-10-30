@@ -10,6 +10,8 @@ import net.ledok.datarewriter.DisabledItems;
 import net.ledok.datarewriter.RecipeRewriter;
 import net.ledok.datarewriter.network.BulkRecipeEditPayload;
 import net.ledok.datarewriter.network.DisabledItemsPayload;
+import net.ledok.datarewriter.network.ThaumcraftRecipesPayload;
+import net.ledok.datarewriter.compat.thaumcraft.ThaumcraftCompat;
 import net.ledok.datarewriter.network.LootEditNetworking;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RecipeSaveNetworking;
@@ -34,6 +36,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import net.neoforged.neoforge.registries.RegisterEvent;
 
+import java.util.List;
 import java.util.ServiceLoader;
 
 @Mod(Datarewriter.MOD_ID)
@@ -62,7 +65,10 @@ public final class DatarewriterNeoForge {
                     Datarewriter.onDataPackReloaded(server);
                 }
             }
-            e.getRelevantPlayers().forEach(player -> RecipeRewriter.sendToEditor(server, player));
+            List<ServerPlayer> players = e.getRelevantPlayers().toList();
+            players.forEach(player -> RecipeRewriter.sendToEditor(server, player));
+            // Ahead of the recipe sync that follows this event, so recipe viewers reload with it in place.
+            ThaumcraftCompat.sync(players);
         });
         // The recipe JSON phase (removals by id/mod, additions) runs after every other mod's edits.
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST,
@@ -101,6 +107,8 @@ public final class DatarewriterNeoForge {
                 (p, ctx) -> NeoForgeClientPayloads.registryEntry(p));
         r.playToClient(DisabledItemsPayload.TYPE, DisabledItemsPayload.STREAM_CODEC,
                 (p, ctx) -> DisabledItems.receive(p.items()));
+        r.playToClient(ThaumcraftRecipesPayload.TYPE, ThaumcraftRecipesPayload.STREAM_CODEC,
+                (p, ctx) -> NeoForgeClientPayloads.thaumcraftRecipes(p));
     }
 
     private static ServerPlayer player(IPayloadContext ctx) {

@@ -1,6 +1,7 @@
 package net.ledok.datarewriter.mixin;
 
 import net.ledok.datarewriter.DisabledItems;
+import net.ledok.datarewriter.compat.thaumcraft.ThaumcraftClient;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundLoginPacket;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,5 +15,6 @@ public abstract class ClientPacketListenerMixin {
     @Inject(method = "handleLogin", at = @At("HEAD"))
     private void datarewriter$clearDisabledItems(ClientboundLoginPacket packet, CallbackInfo ci) {
         DisabledItems.clearClient();
+        ThaumcraftClient.reset();
     }
 }

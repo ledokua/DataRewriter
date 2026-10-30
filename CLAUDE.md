@@ -1,7 +1,7 @@
 # DataRewriter (26.1 branch) — notes for Claude Code sessions
 
 Recipe / loot / tag / registry rewriting for Minecraft 26.1.2, NeoForge only, standalone Gradle build (Java 25,
-ModDevGradle 2.0.148, NeoForge 26.1.2.114). The `multiloader` branch (local checkout `../DataRewriter`, this is
+ModDevGradle 2.0.148, NeoForge 26.1.2.122 — the jar accepts 26.1.2.114+). The `multiloader` branch (local checkout `../DataRewriter`, this is
 its git worktree) holds the 1.21.1 Fabric + NeoForge build with the same packages and class names: carry every
 change over to the other branch when it applies to both.
 
@@ -27,9 +27,20 @@ change over to the other branch when it applies to both.
 - Reference sources: `../../../emi/neoforge/build/moddev/artifacts/minecraft-patched-26.1.2.114-sources.jar`
   and the NeoForge `-sources.jar` in the Gradle cache.
 
+## Thaumcraft 4: Reforged (`compat/thaumcraft/`)
+- Its arcane/crucible/infusion recipes are records in a static map (`TcRecipes.RECIPES`), keyed by strings, on
+  both sides, never synced by Thaumcraft. `ThaumcraftRecipes` keeps Thaumcraft's originals, rebuilds the map
+  on every apply (server start, /reload, editor save) and sends clients the diff (`ThaumcraftRecipesPayload`,
+  from the OnDatapackSyncEvent listener so it lands before UpdateRecipes). Only `install()` writes the map.
+- Only `ThaumcraftCompat` / `ThaumcraftClient` may be called from outside the package (they check `LOADED`).
+- Thaumcraft's own data names items the port lacks: decode strictly only what users write (`add`, editor).
+- The Thaumcraft EMI plugin (Thaumcraft's `emi-plugin` branch, by the "EMI porting" session) reads the map on
+  every EMI reload, retrying on ConcurrentModificationException.
+
 ## Build & test
-- `./gradlew build` → `build/libs/DataRewriter-neoforge-<version>+26.1.2.jar`. EMI Continued is compile-only
-  from the local jar named by `emi_jar` in `gradle.properties`.
+- `./gradlew build` → `build/libs/DataRewriter-neoforge-<version>+26.1.2.jar`. EMI Continued comes from Maven
+  Local (the EMI checkout publishes it); Thaumcraft 4: Reforged is compile-only from `thaumcraft_jar` and joins
+  dev runs (with TerraBlender) when that jar exists.
 - `runServer` (`run-server/`, port 25617, a test config in `run-server/config/datarewriter/`) and `runClient`
   (`run/`, world `smoke`). Gradle does not pass stdin to the server console.
 - Headless client: own Xvfb display (check `/tmp/.X11-unix/` — `pgrep -f` matches your own shell), then

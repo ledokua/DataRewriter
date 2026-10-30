@@ -243,7 +243,7 @@ public final class RewriteRules {
                     List.copyOf(lootRemovals), List.copyOf(lootAdditions), List.copyOf(lootModifications),
                     List.copyOf(lootItemReplacements), List.copyOf(lootItemRemovals),
                     List.copyOf(registryRemovals), List.copyOf(registryAdditions),
-                    List.copyOf(registryModifications), List.copyOf(disabledItems), List.copyOf(featureRemovals), 0);
+                    List.copyOf(registryModifications), List.copyOf(disabledItems), List.copyOf(featureRemovals), List.of(), 0);
         }
 
         private static IdPattern idPattern(String value) {

@@ -57,17 +57,32 @@ neoForge {
     }
 }
 
+repositories {
+    mavenLocal {
+        content { includeGroup 'dev.emi' }
+    }
+    maven {
+        name = 'Minecraft Forge'
+        url = 'https://maven.minecraftforge.net/'
+        content { includeGroup 'com.github.glitchfiend' }
+    }
+}
+
 dependencies {
-    def emi = files(emi_jar)
-    compileOnly emi
-    // Dev runtime only, so the EMI integration can be tested in runClient. Nothing of it ends up in the jar.
-    if (file(emi_jar).exists()) {
-        runtimeOnly emi
+    compileOnly "dev.emi:emi-continued-neoforge:${emi_version}:api"
+    // Dev runtime only, so the integrations can be tested in runClient/runServer. Nothing of them ends up in
+    // the jar.
+    runtimeOnly "dev.emi:emi-continued-neoforge:${emi_version}"
+    def thaumcraft = files(thaumcraft_jar)
+    compileOnly thaumcraft
+    if (file(thaumcraft_jar).exists()) {
+        runtimeOnly thaumcraft
+        runtimeOnly("com.github.glitchfiend:TerraBlender-neoforge:${terrablender_version}") { transitive = false }
     }
 }
 
 processResources {
-    def props = [version: version, minecraft_version: minecraft_version, neoforge_version: neoforge_version]
+    def props = [version: version, minecraft_version: minecraft_version, neoforge_version: neoforge_min_version]
     inputs.properties props
     filteringCharset = 'UTF-8'
     filesMatching('META-INF/neoforge.mods.toml') {
