@@ -1,30 +1,80 @@
+// DataRewriter for Minecraft 26.1.2, NeoForge only. Same packages and class names as the 1.21.1 MultiLoader
+// build on the multiloader branch (common/ + neoforge/), so changes can be carried over file by file.
 plugins {
-    id 'fabric-loom' version '1.17-SNAPSHOT' apply false
-    id 'net.neoforged.moddev' version '2.0.144' apply false
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.148'
 }
 
-subprojects {
-    apply plugin: 'java'
-    apply plugin: 'maven-publish'
+version = "${mod_version}+${minecraft_version}"
+group = maven_group
 
-    version = rootProject.mod_version
-    group = rootProject.maven_group
+base {
+    archivesName = archives_base_name
+}
 
-    repositories {
-        mavenCentral()
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+    options.compilerArgs.addAll(['-Xmaxerrs', '5000'])
+}
+
+neoForge {
+    version = neoforge_version
+
+    runs {
+        client {
+            client()
+            gameDirectory = project.file('run')
+            // Screenshot harness (see ScreenshotHarness). ModDevGradle runs ignore Gradle's --args, so the
+            // world comes from -PquickPlay=<world> here.
+            ['screenshotTypes', 'screenshotSample'].each { name ->
+                if (project.hasProperty(name)) {
+                    systemProperty("datarewriter.$name", project.property(name).toString())
+                }
+            }
+            if (project.hasProperty('quickPlay')) {
+                programArguments.addAll('--quickPlaySingleplayer', project.property('quickPlay').toString())
+            }
+            if (project.hasProperty('username')) {
+                programArguments.addAll('--username', project.property('username').toString())
+            }
+        }
+        server {
+            server()
+            gameDirectory = project.file('run-server')
+        }
     }
 
-    def targetJavaVersion = 21
-    tasks.withType(JavaCompile).configureEach {
-        it.options.encoding = "UTF-8"
-        it.options.release.set(targetJavaVersion)
+    mods {
+        datarewriter {
+            sourceSet sourceSets.main
+        }
     }
+}
 
-    java {
-        // Pinned, not "only when the current JVM is too old": 1.21.1 is a Java 21 game, and launching the
-        // dev client on a newer JVM only earns warnings out of Minecraft's own JNA and Guava (restricted
-        // native access, sun.misc.Unsafe). This keeps the run on 21 whatever JVM starts Gradle.
-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-        withSourcesJar()
+dependencies {
+    def emi = files(emi_jar)
+    compileOnly emi
+    // Dev runtime only, so the EMI integration can be tested in runClient. Nothing of it ends up in the jar.
+    if (file(emi_jar).exists()) {
+        runtimeOnly emi
     }
+}
+
+processResources {
+    def props = [version: version, minecraft_version: minecraft_version, neoforge_version: neoforge_version]
+    inputs.properties props
+    filteringCharset = 'UTF-8'
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand props
+    }
+}
+
+jar {
+    from(rootProject.file('LICENSE.txt')) { rename { "${it}_DataRewriter" } }
 }

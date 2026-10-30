@@ -1,15 +1,15 @@
 # DataRewriter
 
-Recipe and loot table rewriting for Minecraft **1.21.1** (Fabric and NeoForge). Remove, replace and add
+Recipe and loot table rewriting for Minecraft **26.1.2** (NeoForge; the `multiloader` branch has the 1.21.1
+Fabric + NeoForge build). Remove, replace and add
 recipes and loot tables through plain config files — KubeJS-style control without a scripting engine —
 or skip the JSON entirely and do it in game: a recipe editor drawn on each station's own GUI, a bulk
 recipe tweaker, and a loot table editor that writes straight into the running server. It can also take
 whole items out of the game and switch off worldgen features.
 
-> Minecraft 1.21.1 · Java 21 · Fabric (needs [Fabric API](https://modrinth.com/mod/fabric-api)) or
-> NeoForge, one jar per loader. **Server-side.** Vanilla clients can join and get every rewritten recipe
-> through normal recipe sync; installing the mod on your own client is what adds the editors. All in-game
-> editing requires operator level 2.
+> Minecraft 26.1.2 · Java 25 · NeoForge 26.1.2.114+. **Server-side.** Vanilla clients can join; installing
+> the mod on your own client is what adds the editors. All in-game editing requires operator level 2.
+> What differs from the 1.21.1 build is listed under [26.1 notes](#261-notes).
 
 ## Find a feature
 
@@ -43,8 +43,7 @@ whole items out of the game and switch off worldgen features.
 
 ## Getting started
 
-1. Drop the jar for your loader into `mods/` on the server (on Fabric, Fabric API is required; on
-   NeoForge nothing else). Install it on your client too if you want the [editors](#in-game-editors) —
+1. Drop the jar into `mods/` on the server (NeoForge needs nothing else). Install it on your client too if you want the [editors](#in-game-editors) —
    other players don't need it.
 2. On first launch the mod writes `config/datarewriter/example.json5`, with every rule type documented.
 3. Edit it (or add your own file) and run `/reload`. Ops get a chat summary — how many recipes were
@@ -151,9 +150,10 @@ GUI](#recipe-tweaks).
 
 Entries in `add` use the vanilla recipe JSON format (the same one datapacks use), with two conveniences:
 
-1. **Shorthand strings** — for vanilla recipe types you can write ingredients as `"minecraft:oak_log"` or
-   `"#minecraft:planks"` and results as `"minecraft:diamond"`; DataRewriter expands them to the strict
-   1.21.1 format for you.
+1. **Ingredients and results** — since 1.21.2 ingredients are plain strings, `"minecraft:oak_log"` or
+   `"#minecraft:planks"` (or a list of them). Configs written for 1.21.1 still load: the old
+   `{"item": ...}` / `{"tag": ...}` objects are converted for vanilla recipe types and anything built on the
+   shaped pattern/key structure. A result can be written as just `"minecraft:diamond"`.
 2. **Replacing** — give an entry an `id` matching an existing recipe and it replaces that recipe. Without
    an `id`, one is generated (`datarewriter:<filename>/<n>`).
 
@@ -805,75 +805,93 @@ Other mods can contribute rules from code, listen for recipe and loot table chan
 editor layouts for their own recipe types through the `datarewriter` and `datarewriter_client`
 entrypoints — see [`API.md`](API.md).
 
+## 26.1 notes
+
+What changed from the 1.21.1 build, for players and pack makers:
+
+- **Recipe lists on clients.** Since 1.21.2 a server no longer sends its recipes to clients. DataRewriter
+  sends the full list to **operators** (they need it for the editors and EMI's fill button) on join, after
+  `/reload` and on `/datarewriter reload`; everyone else gets what other mods request (EMI Continued has its
+  own recipe sync). `/datarewriter reload` also re-posts NeoForge's datapack-sync event, so those mods resend
+  theirs after an editor save.
+- **Ingredient format.** Recipe JSON uses plain `"id"` / `"#tag"` strings for ingredients; the editors save
+  that form, `replace_ingredients` and `items.disable` find both it and the old objects, and old configs are
+  converted (see [Adding & replacing recipes](#adding--replacing-recipes)).
+- **NeoForge's `c:` tags.** Vanilla recipes on NeoForge use common tags (`#c:rods/wooden`, `#c:leathers`, …)
+  instead of single items, so `replace_ingredients { from: "minecraft:stick" }` only reaches recipes naming
+  the stick itself. Use the tag (`from: "#c:rods/wooden"`) to reach the rest.
+- **Animated machine previews** (Create-style layouts) draw through a picture-in-picture layer. Standalone
+  model parts of other mods (Flywheel partials such as a mixer head) can't be looked up by path on NeoForge
+  26.x, so those parts are skipped; whole blocks still draw.
+- **Recipe types without a recipe-book display** (most modded and all special recipes) have no parsed result
+  any more, so `output` removal rules and `items.disable` read the result from the recipe's JSON (`result` /
+  `output` / `results`).
+- The 1.21.1-only bundled layouts (Create, Farmer's Delight, Forbidden Arcanus, Ars Nouveau, Mystical
+  Agriculture, Eidolon, Malum, Eternal Starlight) stay in the jar and switch on by themselves when a 26.1
+  version of the mod with the same recipe types is installed.
+
 ## Compatibility
 
 | Works with | How |
 |---|---|
 | **Vanilla clients** | Fully supported: rewritten recipes reach them through normal recipe sync, and the `/datarewriter` commands are server-side, so ids stay clickable-to-copy in chat. Only the editors need the mod on the client. |
-| **[EMI](https://modrinth.com/mod/emi)** | Optional, and the best companion: item and fluid side panels with drag & drop into any slot, the **fill (+)** button that loads an existing recipe into the editor, and **R**/**U** lookups over every DataRewriter screen. Nothing is required at runtime. |
+| **[EMI](https://modrinth.com/mod/emi)** ([EMI Continued](https://modrinth.com/mod/emi-continued) on 26.1) | Optional, and the best companion: item and fluid side panels with drag & drop into any slot, the **fill (+)** button that loads an existing recipe into the editor, and **R**/**U** lookups over every DataRewriter screen. Nothing is required at runtime. |
 | **JEI / REI** | No integration needed — they read the synced recipe list, so added and removed recipes show up after `/datarewriter reload` (or `/reload`, or rejoining). |
 | **Mods that add recipe types** | Removal and JSON `add` always work. In the editor, vanilla and fourteen mods get [hand-drawn layouts](#natively-supported-mods) and everything else is [detected automatically](#modded-recipe-types--automatic); a [manual layout](#editor-layouts--manual-override) overrides either. |
 | **Mods that inject loot at runtime** | RPG-series equipment injectors, loot-weight tweakers and anything else using the loader's loot events (Fabric `LootTableEvents`, NeoForge `LootTableLoadEvent`): their pools are shown, preserved across live edits, and covered by [item rules](#item-rules-across-tables). See [loot injected by other mods](#loot-injected-by-other-mods). NeoForge's global loot modifiers are a different mechanism — they rewrite the *rolled* drops, not the table — so the editor doesn't show them and item rules don't touch them; they still apply on top of whatever DataRewriter produced. |
 
-DataRewriter targets **1.21.1** specifically, on Fabric and NeoForge: 1.21.2+ replaced `RecipeManager`'s
-internals (`RecipeMap`) and would need a different implementation.
+This branch targets **26.1.2** on NeoForge; the `multiloader` branch keeps the 1.21.1 Fabric + NeoForge
+build. The two share packages and class names, so changes carry over file by file.
 
 ## Notes for developers
 
-Where things live (all under `common/src/main/java/net/ledok/datarewriter/`):
+Where things live (all under `src/main/java/net/ledok/datarewriter/`):
 
 | Feature | Code |
 |---|---|
-| Config parsing, validation, the generated example | `config/ConfigLoader.java`, rule records in `config/RewriteConfig.java` |
-| Recipe rules (JSON phase, parsed phase, ingredient swaps, disabled-item recipes) | `RecipeRewriter.java`, `mixin/RecipeManagerMixin.java` |
-| Loot rules (JSON phase, post-injection pass, live rebinds) | `LootRewriter.java`, `LootInjectionRewriter.java`, `LootLiveApplier.java` |
-| `items.disable` runtime: lookups, stack and trade conversion, client list | `DisabledItems.java`; mixins `TagLoaderMixin` (tags), `AbstractContainerMenuMixin` (slots), `ServerLevelMixin` / `ItemEntityMixin` (drops), `AbstractVillagerMixin` (trades), `PlayerListMixin` (sync), `CreativeModeTabMixin` + EMI plugin (client hiding) |
+| Config parsing, validation, the generated example | `config/ConfigLoader.java`, rule records in `config/RewriteConfig.java`, 1.21.1 ingredient conversion in `config/RecipeJsonNormalizer.java` |
+| Recipe rules (JSON phase, parsed phase, ingredient swaps, disabled-item recipes, client sync) | `RecipeRewriter.java` (JSON phase on NeoForge's `ModifyRecipeJsonsEvent`), `RecipeView.java` (results/ingredients of parsed recipes), `mixin/RecipeManagerAccessor.java` |
+| Loot rules (JSON phase, post-injection pass, live rebinds) | `LootRewriter.java`, `LootInjectionRewriter.java`, `LootLiveApplier.java`, `mixin/SimpleJsonResourceReloadListenerMixin.java` |
+| `items.disable` runtime: lookups, stack and trade conversion, client list | `DisabledItems.java`; mixins `TagLoaderMixin` (tags, and the config reload), `AbstractContainerMenuMixin` (slots), `ServerLevelMixin` / `ItemEntityMixin` (drops), `AbstractVillagerMixin` (trades), `PlayerListMixin` (sync), `CreativeModeTabMixin` + EMI plugin (client hiding) |
 | `worldgen.remove_features` | `RemovedFeatures.java`, `mixin/PlacedFeatureMixin.java` |
-| Datapack registries | `RegistryRewriter.java`, `RegistryLiveApplier.java`, `mixin/RegistryDataLoaderMixin.java` |
-| Editors (client) | `client/gui/` — `RecipeEditorScreen`, `LootTableEditorScreen`, per-mod `*Layouts.java` |
+| Datapack registries | `RegistryRewriter.java`, `RegistryLiveApplier.java`; mixins `RegistryDataLoaderMixin` (start of a load), `PendingRegistrationMixin` (remove / rewrite one entry), `RegistryLoadTaskMixin` + `ResourceManagerRegistryLoadTaskMixin` (additions) |
+| Editors (client) | `client/gui/` — `RecipeEditorScreen`, `LootTableEditorScreen`, per-mod `*Layouts.java`; client recipe list in `client/ClientRecipes.java` |
 | Addon API | `api/` — documented in [`API.md`](API.md) |
 
-- MultiLoader layout, same as NPCs_LD: `common/` holds all the code (Mojmap, vanilla-only — no Fabric API
-  — including the mixins, which Loom remaps into the Fabric jar); `fabric/` and `neoforge/` are thin glue
-  (`DatarewriterFabric` / `DatarewriterNeoForge` plus their client classes) that construct the menus and
-  register commands, payloads and lifecycle events. Loader specifics reach common through three
-  `ServiceLoader` interfaces: `Platform` (config dir, loaded mods, the loot load hooks), `Network` (send /
-  can-send per side) and `ClientPlatform` (fluid sprites, standalone models). `./gradlew build` builds all
-  three modules; `:fabric:runClient` / `:neoforge:runClient` start the dev clients (`fabric/run`,
-  `neoforge/run`).
-- Recipes are rewritten in two phases: `id`/`mod` rules and additions are applied to the raw recipe JSON
-  map (mixin at the head of `RecipeManager.apply`), while `output`/`input`/`type` rules run after startup
-  / `/reload` completes — item tags are not bound during recipe loading, so tag matching earlier would
-  silently fail.
-- Loot tables are rewritten in the raw JSON map too (mixin in
-  `SimpleJsonResourceReloadListener.scanDirectory`, filtered to the `loot_table` directory). That hook
-  runs before recipes in vanilla's reload pipeline, so it's also where the config is (re)loaded. The final
-  JSON map is kept in memory — it's what the loot editor reads and searches.
-- Loot editor saves apply without a reload by rebinding the table's `Holder.Reference` inside the frozen
-  reloadable registry (what vanilla itself does during load); brand-new ids briefly unfreeze the registry
-  to register. Before binding, the loader's loot load hooks (Fabric's `LootTableEvents` REPLACE + MODIFY,
-  NeoForge's `LootTableLoadEvent` — `Platform.applyLootHooks`) are re-invoked on the freshly parsed table
-  and the config's item rules are applied over the result, so runtime loot injections from other mods are
-  preserved *and* covered by item rules; the JSON cache stays at the datapack level, so injections never
-  stack. A post-injection pass (`LootInjectionRewriter`, from `Datarewriter.onServerStarted` /
-  `onDataPackReloaded`, which each loader wires to its server-started and end-of-`/reload` events) does
-  the same on reload: it encodes each live table back to
-  JSON with the vanilla codec, re-applies the item rules and rebinds tables where injected entries
-  matched. The editor shows injected pools by diffing the live table's encoded pools against the
-  datapack-level cache (the extra tail pools are the injected ones).
+- NeoForge-only standalone build (ModDevGradle 2.0.148, Java 25): `src/` holds everything; `neoforge/`
+  (the `@Mod` classes, payloads, events) is the loader glue, and the `Platform` / `Network` ServiceLoader
+  interfaces stay so code can move between this branch and `multiloader` unchanged.
+  `./gradlew build` → `build/libs/DataRewriter-neoforge-<version>+26.1.2.jar`; `runClient` / `runServer`
+  use `run/` and `run-server/`. EMI Continued is compile-only from a local jar (`emi_jar` in
+  `gradle.properties`) until it is on a Maven.
+- Order of a (re)load on 26.1: server tags load **first** (`TagLoader.loadTagsForExistingRegistries`, where
+  the config is re-read and item tags are pruned for `items.disable`), then loot tables, then recipes. On a
+  world start the datapack registries load before all of that (`RegistryDataLoader.load`, which re-reads the
+  config too).
+- Recipes are rewritten in two phases: `id`/`mod` rules and additions on the raw recipe JSON map
+  (NeoForge's `ModifyRecipeJsonsEvent`, lowest priority), `output`/`input`/`type` rules, ingredient swaps and
+  disabled items after startup / `/reload` completes, when tags are bound. Swapping the live list sets
+  `RecipeManager.recipes` and reruns `finalizeRecipeLoading` (property sets, stonecutter list, displays).
+- Loot tables are rewritten in the raw JSON map: `SimpleJsonResourceReloadListener.scanDirectory` is routed
+  through NeoForge's `scanDirectoryWithModifier` for the `loot_table` directory, which collects the JSON
+  before parsing. The final JSON map is kept in memory — it's what the loot editor reads and searches.
+- Loot editor saves apply without a reload by rebinding the table's `Holder.Reference` inside the
+  reloadable loot registry (`LootLiveApplier.lootRegistry`); brand-new ids briefly unfreeze it to register.
+  Before binding, NeoForge's `LootTableLoadEvent` is re-fired on the freshly parsed table
+  (`Platform.applyLootHooks`) and the config's item rules are applied over the result, so runtime loot
+  injections from other mods are preserved *and* covered by item rules; the JSON cache stays at the
+  datapack level, so injections never stack. A post-injection pass (`LootInjectionRewriter`, from
+  `Datarewriter.onServerStarted` / `onDataPackReloaded`) does the same on reload.
 - Bundled layouts can carry a `Decoration` (`EditorLayout.decoration`) that draws over the panel and under
-  the slot contents; `GuiBlocks` renders block states and standalone models (Flywheel partials, fetched
-  through `ClientPlatform.standaloneModel` — Fabric's injected `ModelManager.getModel(id)`, NeoForge's
-  `ModelResourceLocation.standalone`) with Catnip-`GuiGameElement` transform semantics, so a mod's
-  recipe-viewer animations can be ported by id without a compile dependency — see `CreateLayouts`.
-- Screenshot harness: run the client with
-  `./gradlew :fabric:runClient -PscreenshotTypes=create:mixing,create:pressing` (also `loot:<table id>`
-  for the loot editor; `:neoforge:runClient` takes the same properties) and it opens the recipe editor on
-  each type once in a world (loading the first existing recipe of that type, or sample values with
-  `-PscreenshotSample=true`), saves `screenshots/<type>.png` and quits. Works headless:
-  `xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew :fabric:runClient --args="--quickPlaySingleplayer <world> --width 1280 --height 720"`
-  with `LIBGL_ALWAYS_SOFTWARE=1` and `onboardAccessibility:false` in `fabric/run/options.txt`. The
-  NeoForge run ignores `--args`; pass the world as `-PquickPlay=<world>` instead.
+  the slot contents. The GUI pose is 2D since 1.21.6, so `GuiBlocks` builds a `Scene` — block models and
+  fluid boxes under its own 3D `PoseStack`, with Catnip-`GuiGameElement` transform semantics — and submits
+  it as a picture-in-picture state that `GuiBlocks.SceneRenderer` (registered through NeoForge's
+  `RegisterPictureInPictureRenderersEvent`) draws into its own texture. See `CreateLayouts`.
+- Screenshot harness: `./gradlew runClient -PquickPlay=<world> -PscreenshotTypes=minecraft:crafting_shaped,loot:<table id>`
+  opens the editor on each type once in a world (loading the first existing recipe of that type, or sample
+  values with `-PscreenshotSample=true`) and saves `run/screenshots/<type>.png`. Headless: own Xvfb display
+  and `env -u WAYLAND_DISPLAY DISPLAY=:<n> ./gradlew runClient ...`, `onboardAccessibility:false` in
+  `run/options.txt`.
 - Addon API ([`API.md`](API.md)): rules from code (`RewriteRules`), change events (`DataRewriterEvents`)
   and editor layouts from code (`EditorLayouts.register`), through the `datarewriter` /
   `datarewriter_client` entrypoints (ServiceLoader providers on NeoForge).
