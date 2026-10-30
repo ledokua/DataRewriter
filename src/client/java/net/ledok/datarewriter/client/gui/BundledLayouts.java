@@ -67,6 +67,7 @@ final class BundledLayouts {
         }
         layouts.addAll(CreateLayouts.forInstalledTypes());
         layouts.addAll(EternalStarlightLayouts.forInstalledTypes());
+        layouts.addAll(ModernIndustrializationLayouts.forInstalledTypes());
         return layouts;
     }
 
