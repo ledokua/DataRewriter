@@ -116,9 +116,27 @@ public final class EditorLayout {
         }
     }
 
-    /** suggestions = values seen in existing recipes (or listed in a layout file), shown as a tooltip. */
+    /**
+     * Last step of building a recipe (bundled layouts only): checks or
+     * completes the JSON once slots and fields are written. Throwing
+     * IllegalArgumentException blocks the save and shows its message.
+     */
+    public interface Finisher {
+        void finish(JsonObject recipe, SlotView view);
+    }
+
+    /**
+     * suggestions = values seen in existing recipes (or listed in a layout file), shown as a tooltip.
+     * saved = false makes an editor-only field (bundled layouts): shown and readable by the
+     * layout's decoration/finisher, but never written into the recipe JSON.
+     */
     public record FieldDef(String path, String label, FieldType type, String defaultValue,
-                           boolean required, List<String> suggestions) {
+                           boolean required, List<String> suggestions, boolean saved) {
+        public FieldDef(String path, String label, FieldType type, String defaultValue,
+                        boolean required, List<String> suggestions) {
+            this(path, label, type, defaultValue, required, suggestions, true);
+        }
+
         public FieldDef(String path, String label, FieldType type, String defaultValue, boolean required) {
             this(path, label, type, defaultValue, required, List.of());
         }
@@ -149,6 +167,14 @@ public final class EditorLayout {
     public JsonObject template;
     /** Extra art (see {@link Decoration}); null = none. */
     public Decoration decoration;
+    /** Final check/completion of the saved JSON (see {@link Finisher}); null = none. */
+    public Finisher finisher;
+    /**
+     * Lowest chance (percent) Alt+scroll allows on chanceable slots. 1 by
+     * default; 0 for mods where 0% means something (Modern Industrialization:
+     * an input that is required but never consumed).
+     */
+    public int minChance = 1;
     /**
      * True when the decoration draws its own slot frames, so the editor
      * skips its generic grey slot boxes and result arrow (texture-less

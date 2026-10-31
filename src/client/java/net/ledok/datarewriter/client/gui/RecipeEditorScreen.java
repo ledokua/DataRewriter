@@ -695,7 +695,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 lines.add(Component.literal(counts()[index] + " mB").withStyle(ChatFormatting.AQUA));
             }
             if (slot.chanceable()) {
-                lines.add(Component.literal("Chance: " + chances()[index] + "%")
+                int chance = chances()[index];
+                lines.add(Component.literal("Chance: " + chance + "%"
+                                + (chance == 0 && !slot.result() ? " (required, never consumed)" : ""))
                         .withStyle(ChatFormatting.AQUA));
             }
             if (slot.acceptsTags() && !slot.format().fluid() && !ref.startsWith("#")) {
@@ -928,7 +930,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             if (slot.chanceable() && hasAltDown() && refs()[index] != null) {
                 int step = hasShiftDown() ? 1 : 5;
                 int[] chances = chances();
-                chances[index] = Math.max(1, Math.min(100,
+                chances[index] = Math.max(layout.minChance, Math.min(100,
                         chances[index] + (int) Math.signum(scrollY) * step));
                 return true;
             }
@@ -1024,6 +1026,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
 
         for (FieldDef field : layout.fields) {
+            if (!field.saved()) {
+                continue; // editor-only: read by the layout's finisher, never written
+            }
             String text = fieldValue(field).trim();
             if (text.isEmpty()) {
                 if (field.required()) {
@@ -1055,6 +1060,13 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 }
             };
             setAtPath(recipe, field.path(), value);
+        }
+        if (layout.finisher != null) {
+            try {
+                layout.finisher.finish(recipe, slotView);
+            } catch (IllegalArgumentException e) {
+                throw new EditorError(e.getMessage());
+            }
         }
         return recipe;
     }
@@ -1231,6 +1243,20 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
         }
 
+        // Array paths whose slots are all items or all fluids: the layout already
+        // says what their entries are, so they are not sniffed ({"tag", "amount"}
+        // is an item in Modern Industrialization's item_inputs, not a fluid).
+        Map<String, Boolean> arrayKinds = new HashMap<>();
+        Set<String> mixedArrays = new HashSet<>();
+        for (SlotDef slot : layout.slots) {
+            if (slot.path().endsWith("[]")) {
+                Boolean previous = arrayKinds.putIfAbsent(slot.path(), slot.format().fluid());
+                if (previous != null && previous != slot.format().fluid()) {
+                    mixedArrays.add(slot.path());
+                }
+            }
+        }
+
         Map<String, Integer> cursors = new HashMap<>();
         Set<String> consumed = new HashSet<>();
         for (int i = 0; i < layout.slots.size(); i++) {
@@ -1242,8 +1268,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             if (!array && consumed.contains(slot.path())) {
                 continue; // an either/or path already claimed by another slot
             }
+            boolean sniffKind = !array || mixedArrays.contains(slot.path());
             Parsed parsed;
-            if (array) {
+            if (array && sniffKind) {
                 // Arrays may mix items and fluids (Create's ingredients/results):
                 // each slot takes the next entry of its own kind, so an item slot
                 // never swallows a fluid entry meant for a fluid slot.
@@ -1252,15 +1279,15 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 JsonElement value = getAtPath(json, slot.path(), cursors);
                 parsed = value == null ? null : parseAny(value);
             }
-            if (parsed == null || parsed.fluidLike() != slot.format().fluid()) {
+            if (parsed == null || (sniffKind && parsed.fluidLike() != slot.format().fluid())) {
                 continue;
             }
             refs[i] = parsed.ref();
             if (parsed.count() > 0) {
                 counts[i] = Math.max(1, Math.min(slot.format().fluid() ? 1_000_000 : 99, parsed.count()));
             }
-            if (slot.chanceable() && parsed.chance() > 0) {
-                chances[i] = Math.max(1, Math.min(100, Math.round(parsed.chance() * 100)));
+            if (slot.chanceable() && (parsed.chance() > 0 || (parsed.chance() == 0 && layout.minChance == 0))) {
+                chances[i] = Math.max(layout.minChance, Math.min(100, Math.round(parsed.chance() * 100)));
             }
             if (!array) {
                 consumed.add(slot.path());
@@ -1388,6 +1415,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         return current.get(last);
     }
 
+    /** chance is 0-1, or -1 when the entry gives none. */
     private record Parsed(String ref, int count, float chance, boolean fluidLike) {
     }
 
@@ -1428,7 +1456,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     /** Best-effort extraction of (ref, amount, chance) from the shapes recipes use. */
     private static Parsed parseAny(JsonElement value) {
         if (value instanceof JsonPrimitive p && p.isString()) {
-            return new Parsed(p.getAsString(), 0, 0, false);
+            return new Parsed(p.getAsString(), 0, -1, false);
         }
         if (value instanceof JsonArray array) {
             return array.isEmpty() ? null : parseAny(array.get(0));
@@ -1441,7 +1469,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         boolean fluidLike = obj.has("fluid") || obj.has("amount_mb")
                 || (obj.has("amount") && !obj.has("item"));
         int count = intOf(obj, "count", intOf(obj, "amount", intOf(obj, "amount_mb", 0)));
-        float chance = obj.get("chance") instanceof JsonPrimitive c && c.isNumber() ? c.getAsFloat() : 0;
+        // -1 = no chance given; Modern Industrialization calls it "probability".
+        float chance = obj.get("chance") instanceof JsonPrimitive c && c.isNumber() ? c.getAsFloat()
+                : obj.get("probability") instanceof JsonPrimitive p && p.isNumber() ? p.getAsFloat() : -1;
         String ref = null;
         if (obj.get("id") instanceof JsonPrimitive p && p.isString()) {
             ref = p.getAsString();
