@@ -253,8 +253,11 @@ documents it fully) and **require an `id`**: use an existing id to replace that 
 tables are never touched by your own removal rules.
 
 `modify` appends your pools to every matching table without touching its existing loot — the way RPG-style
-mods inject their drops everywhere. It targets like `remove` (`id` with wildcards, `mod`) and runs
-**after** remove/add, so it also applies to tables you added or emptied. To make an injected drop rare,
+mods inject their drops everywhere. It targets like `remove` (`id` with wildcards, `mod`), plus an optional
+`table` scope that works like the one of the [item rules](#item-rules-across-tables): one or more patterns
+where a leading `!` excludes — `{ table: ["*:chests/*", "!*:chests/village/*"], pools: [...] }` injects into
+every chest table except village ones. It runs **after** remove/add, so it also applies to tables you added
+or emptied. To make an injected drop rare,
 weight it against a `minecraft:empty` entry like in the example, or use a `random_chance` condition on the
 pool.
 

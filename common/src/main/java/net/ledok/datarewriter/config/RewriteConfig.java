@@ -117,10 +117,18 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
     }
 
     /**
-     * Injects extra pools into every loot table matching the target rule,
+     * Injects extra pools into every loot table matching the target rule and
+     * the optional 'table' scope ('!' excludes; null = no further restriction),
      * leaving the table's own loot untouched. Applied after remove/add.
      */
-    public record LootModification(LootRule target, JsonArray pools) {
+    public record LootModification(LootRule target, @Nullable TableScope table, JsonArray pools) {
+        public LootModification(LootRule target, JsonArray pools) {
+            this(target, null, pools);
+        }
+
+        public boolean matches(ResourceLocation tableId) {
+            return target.matches(tableId) && (table == null || table.matches(tableId));
+        }
     }
 
     /**

@@ -70,7 +70,7 @@ public final class LootRewriter {
                 }
                 boolean changed = false;
                 for (RewriteConfig.LootModification modification : loaded.lootModifications()) {
-                    if (!modification.target().matches(entry.getKey())) {
+                    if (!modification.matches(entry.getKey())) {
                         continue;
                     }
                     JsonArray pools;

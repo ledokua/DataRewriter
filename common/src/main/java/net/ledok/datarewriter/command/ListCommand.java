@@ -152,8 +152,13 @@ public final class ListCommand {
         }
         for (RewriteConfig.LootModification modification : config.lootModifications()) {
             RewriteConfig.LootRule target = modification.target();
-            lines.add("loot modify " + (target.id() != null ? target.id().toString() : "mod " + target.mod())
-                    + " — " + modification.pools().size() + " pools appended (from " + target.source() + ")");
+            String what = target.id() != null ? target.id().toString()
+                    : target.mod() != null ? "mod " + target.mod() : "table " + modification.table();
+            if (target.id() != null || target.mod() != null) {
+                what += modification.table() != null ? " (table " + modification.table() + ")" : "";
+            }
+            lines.add("loot modify " + what + " — " + modification.pools().size()
+                    + " pools appended (from " + target.source() + ")");
         }
         int pending = RecipeRewriter.pendingClientEdits();
         if (pending > 0) {

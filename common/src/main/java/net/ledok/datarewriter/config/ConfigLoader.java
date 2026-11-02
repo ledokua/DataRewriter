@@ -652,14 +652,15 @@ public final class ConfigLoader {
             }
             IdPattern id = readIdPattern(obj, "id", fileName, index);
             String mod = readString(obj, "mod");
+            TableScope table = readTableScope(obj, fileName, "modify", index);
             for (String key : obj.keySet()) {
-                if (!List.of("id", "mod", "pools").contains(key)) {
+                if (!List.of("id", "mod", "table", "pools").contains(key)) {
                     warn("[{}] loot_tables modify[{}]: unknown key '{}'",
                             fileName, index, key);
                 }
             }
-            if (id == null && mod == null) {
-                error("[{}] loot_tables modify[{}] has no valid target conditions ('id' and/or 'mod'), "
+            if (id == null && mod == null && table == null) {
+                error("[{}] loot_tables modify[{}] has no valid target conditions ('id', 'mod' and/or 'table'), "
                         + "skipping (an empty target would modify every loot table)", fileName, index);
                 continue;
             }
@@ -668,7 +669,7 @@ public final class ConfigLoader {
                 continue;
             }
             lootModifications.add(new RewriteConfig.LootModification(
-                    new RewriteConfig.LootRule(id, mod, fileName), pools.deepCopy()));
+                    new RewriteConfig.LootRule(id, mod, fileName), table, pools.deepCopy()));
         }
     }
 
