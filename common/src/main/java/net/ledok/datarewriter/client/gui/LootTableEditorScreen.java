@@ -8,6 +8,7 @@ import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.JsonOps;
 import net.ledok.datarewriter.platform.Network;
 import net.ledok.datarewriter.menu.LootEditorMenu;
+import net.ledok.datarewriter.network.LootEditNetworking;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -58,7 +59,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
      * editor's slots): reopening a table restores its draft; Save and Reload
      * clear it.
      */
-    private record Draft(String tableJson, List<Boolean> newFlags, boolean dirtyExisting) {
+    private record Draft(String tableJson, List<Boolean> newFlags, boolean dirtyExisting,
+                         List<String> ruleSources, List<String> generatedNotes) {
     }
 
     private static final Map<String, Draft> DRAFTS = new HashMap<>();
@@ -71,6 +73,22 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     private boolean dirtyExisting;
     /** The table exists on the server (saving an empty pool list can empty it). */
     private boolean existsOnServer;
+
+    /** Where the table's parts come from, sent just before the content (null: an older server sends none). */
+    private JsonObject pendingProvenance;
+    /** The server sent provenance: rule pools are known, so saves leave them out. */
+    private boolean provenanceKnown;
+    /** A config rule owning the whole table: "add" (added/replaced) or "remove" (emptied), its file, its note. */
+    private String ownerKind;
+    private String ownerSource;
+    private String ownerGenerated;
+    /** The table belongs to a generated config file: nothing here can be edited or saved. */
+    private boolean tableLocked;
+    /** Table-level functions other mods add at load (read-only chips). */
+    private final List<JsonObject> injectedFunctions = new ArrayList<>();
+    /** Chip hit boxes of the last frame: {x0, y0, x1, y1, index}; index < 0 = injected (not removable). */
+    private final List<int[]> chipBoxes = new ArrayList<>();
+    private int stripY;
 
     private Component status = Component.empty();
 
@@ -99,7 +117,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     private int uiBottom;
 
     enum Kind {
-        ITEM, TAG, EMPTY, COMPOSITE, TABLE_REF, COMPLEX
+        ITEM, TAG, EMPTY, COMPOSITE, TABLE_REF, CUSTOM, COMPLEX
     }
 
     static final class EntryState {
@@ -143,6 +161,17 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         return entry;
     }
 
+    /** An entry of a type registered with {@link LootEditorExtensions}, from its JSON. */
+    static EntryState newCustom(JsonObject source) {
+        EntryState entry = new EntryState();
+        entry.source = source;
+        entry.kind = Kind.CUSTOM;
+        if (source.get("weight") instanceof JsonPrimitive w && w.isNumber()) {
+            entry.weight = Math.max(1, w.getAsInt());
+        }
+        return entry;
+    }
+
     /** A fresh nested-loot-table entry pointing at the given table id. */
     static EntryState newTableRef(String tableId) {
         EntryState entry = new EntryState();
@@ -165,25 +194,50 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         boolean injected;
         /** Namespace guess of the injecting mod ("" = unknown). */
         String injectedBy = "";
+        /**
+         * Appended by a config {@code modify} rule in this file (not the editor's own file) — read-only, never
+         * saved with the table: the rule appends it again on every load.
+         */
+        String ruleSource;
+        /** That file's {@code generated} note ("" = generated, nothing said), or null for a hand-written file. */
+        String generatedNote;
     }
 
     public LootTableEditorScreen(Screen parent, String tableId) {
+        this(parent, tableId, false);
+    }
+
+    /** {@code returnOnClose}: Close goes back to {@code parent} (opened from a sub-editor) instead of the game. */
+    public LootTableEditorScreen(Screen parent, String tableId, boolean returnOnClose) {
         super(new LootEditorMenu(0, Minecraft.getInstance().player.getInventory()),
                 Minecraft.getInstance().player.getInventory(),
                 Component.literal("Loot Table Editor"));
         this.parent = parent;
         this.tableId = tableId;
+        this.returnOnClose = returnOnClose;
         requestContent();
     }
 
+    private final boolean returnOnClose;
+
     private void requestContent() {
         loading = true;
+        pendingProvenance = null;
         if (Network.INSTANCE.canSendToServer(LootPayloads.TableRequest.TYPE)) {
             Network.INSTANCE.sendToServer(new LootPayloads.TableRequest(tableId));
         } else {
             loading = false;
             status = Component.literal("This server doesn't run DataRewriter — nothing to edit.")
                     .withStyle(ChatFormatting.RED);
+        }
+    }
+
+    /** The server's provenance for this table; it arrives just before {@link #onContent}. */
+    public void onProvenance(String json) {
+        try {
+            pendingProvenance = JsonParser.parseString(json) instanceof JsonObject obj ? obj : null;
+        } catch (Exception e) {
+            pendingProvenance = null;
         }
     }
 
@@ -195,6 +249,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         cursorItem = null;
         tableSource = new JsonObject();
         existsOnServer = !json.isEmpty();
+        applyTableProvenance();
         if (restoreDraft(injected)) {
             return;
         }
@@ -205,7 +260,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             try {
                 if (JsonParser.parseString(json) instanceof JsonObject table) {
                     parseTable(table);
-                    status = Component.empty();
+                    applyPoolProvenance();
+                    status = lockedStatus();
                 } else {
                     status = Component.literal("Unexpected table JSON from the server.")
                             .withStyle(ChatFormatting.RED);
@@ -233,6 +289,10 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             for (int i = 0; i < pools.size() && i < draft.newFlags().size(); i++) {
                 pools.get(i).isNew = draft.newFlags().get(i);
             }
+            for (int i = 0; i < pools.size() && i < draft.ruleSources().size(); i++) {
+                pools.get(i).ruleSource = draft.ruleSources().get(i);
+                pools.get(i).generatedNote = draft.generatedNotes().get(i);
+            }
             dirtyExisting = draft.dirtyExisting();
             status = Component.literal("Restored unsaved edits from this session — Reload discards them.")
                     .withStyle(ChatFormatting.YELLOW);
@@ -245,6 +305,76 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             DRAFTS.remove(tableId);
             return false;
         }
+    }
+
+    /** Owner, locks and injected table functions from the provenance (before the pools are parsed). */
+    private void applyTableProvenance() {
+        ownerKind = null;
+        ownerSource = null;
+        ownerGenerated = null;
+        tableLocked = false;
+        injectedFunctions.clear();
+        provenanceKnown = pendingProvenance != null;
+        if (pendingProvenance == null) {
+            return;
+        }
+        if (pendingProvenance.get("owner") instanceof JsonObject owner) {
+            ownerKind = string(owner, "kind");
+            ownerSource = string(owner, "source");
+            ownerGenerated = string(owner, "generated");
+            tableLocked = ownerGenerated != null;
+        }
+        if (pendingProvenance.get("injected_functions") instanceof JsonArray functions) {
+            for (JsonElement element : functions) {
+                if (element instanceof JsonObject fn) {
+                    injectedFunctions.add(fn);
+                }
+            }
+        }
+    }
+
+    /** Marks the pools config rules appended (aligned with the server's cached table). */
+    private void applyPoolProvenance() {
+        if (pendingProvenance == null || !(pendingProvenance.get("pools") instanceof JsonArray sources)) {
+            return;
+        }
+        for (int i = 0; i < pools.size() && i < sources.size(); i++) {
+            if (sources.get(i) instanceof JsonObject source
+                    && !(source.get("gui") instanceof JsonPrimitive gui && gui.getAsBoolean())) {
+                pools.get(i).ruleSource = string(source, "source");
+                pools.get(i).generatedNote = string(source, "generated");
+            }
+        }
+    }
+
+    private static String string(JsonObject obj, String key) {
+        return obj.get(key) instanceof JsonPrimitive p && p.isString() ? p.getAsString() : null;
+    }
+
+    /** The status line for a generated table, or nothing. */
+    private Component lockedStatus() {
+        if (!tableLocked) {
+            return Component.empty();
+        }
+        return Component.literal("Generated table (" + ownerSource + ") — read-only here: "
+                + changeHint(ownerGenerated)).withStyle(ChatFormatting.GOLD);
+    }
+
+    /** "change the Eden Loot Plan" / a generic hint for a generated file. */
+    static String changeHint(String generatedNote) {
+        return generatedNote == null || generatedNote.isEmpty()
+                ? "change what generates that file, not this table"
+                : "change the " + generatedNote;
+    }
+
+    /** Can't be edited here: injected by a mod, appended by a config rule, or the whole table is generated. */
+    private boolean frozen(PoolState pool) {
+        return pool.injected || pool.ruleSource != null || tableLocked;
+    }
+
+    /** Pools saved with the table: its own, plus those saved earlier with "Save added pools". */
+    private static boolean ownPool(PoolState pool) {
+        return !pool.injected && pool.ruleSource == null;
     }
 
     /** Pools other mods added at runtime, appended to the view as read-only. */
@@ -401,7 +531,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     entry.kind = Kind.COMPLEX;
                 }
             }
-            default -> entry.kind = Kind.COMPLEX;
+            default -> entry.kind = LootEditorExtensions.entryType(type) != null ? Kind.CUSTOM : Kind.COMPLEX;
         }
         if (source.get("weight") instanceof JsonPrimitive w && w.isNumber()) {
             entry.weight = Math.max(1, w.getAsInt());
@@ -580,20 +710,75 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         return pool.source;
     }
 
+    /**
+     * The table as saved: its own pools only — injected ones belong to their mod, rule pools to their
+     * rule. With provenance from the server it carries a marker saying so, which the server strips.
+     */
     private JsonObject buildTableJson() {
         JsonArray array = new JsonArray();
         for (PoolState pool : pools) {
-            if (!pool.injected) { // injected pools belong to the other mod
+            if (ownPool(pool)) {
                 array.add(syncPool(pool));
             }
         }
         tableSource.add("pools", array);
-        return tableSource;
+        JsonObject table = tableSource.deepCopy();
+        if (provenanceKnown) {
+            table.addProperty(LootEditNetworking.OWN_POOLS_MARKER, true);
+        }
+        return table;
     }
 
-    /** The table's own pools — everything except runtime-injected ones. */
+    /** Every pool but injected ones, in order — the draft, which also remembers which came from rules. */
+    private JsonObject buildDraftJson() {
+        JsonArray array = new JsonArray();
+        for (PoolState pool : pools) {
+            if (!pool.injected) {
+                array.add(syncPool(pool));
+            }
+        }
+        JsonObject table = tableSource.deepCopy();
+        table.add("pools", array);
+        return table;
+    }
+
+    /** The table's own pools — everything except runtime-injected and rule ones. */
     private boolean hasOwnPools() {
-        return pools.stream().anyMatch(pool -> !pool.injected);
+        return pools.stream().anyMatch(LootTableEditorScreen::ownPool);
+    }
+
+    /** A problem a registered entry type reports in the pools about to be saved, or null. */
+    private String invalidCustomEntry() {
+        for (PoolState pool : pools) {
+            if (!ownPool(pool)) {
+                continue;
+            }
+            for (EntryState entry : pool.entries) {
+                String error = invalidCustomEntry(entry);
+                if (error != null) {
+                    return error;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String invalidCustomEntry(EntryState entry) {
+        if (entry.kind == Kind.CUSTOM) {
+            String type = entry.source.get("type") instanceof JsonPrimitive p ? normalizeId(p.getAsString()) : "";
+            LootEditorExtensions.EntryType ext = LootEditorExtensions.entryType(type);
+            String error = ext == null ? null : ext.validate(entry.source);
+            if (error != null) {
+                return ext.displayName() + ": " + error;
+            }
+        }
+        for (EntryState child : entry.children) {
+            String error = invalidCustomEntry(child);
+            if (error != null) {
+                return error;
+            }
+        }
+        return null;
     }
 
     // --- saving ---------------------------------------------------------
@@ -615,6 +800,15 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     private Runnable pendingSuccess;
 
     private void saveReplace() {
+        if (tableLocked) {
+            status = lockedStatus();
+            return;
+        }
+        String invalid = invalidCustomEntry();
+        if (invalid != null) {
+            status = Component.literal(invalid).withStyle(ChatFormatting.RED);
+            return;
+        }
         if (!hasOwnPools()) {
             // No pools left: for an existing table this saves an "empty this
             // table" rule (it will drop nothing at all).
@@ -646,6 +840,15 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     }
 
     private void saveModify() {
+        if (tableLocked) {
+            status = lockedStatus();
+            return;
+        }
+        String invalid = invalidCustomEntry();
+        if (invalid != null) {
+            status = Component.literal(invalid).withStyle(ChatFormatting.RED);
+            return;
+        }
         JsonArray newPools = new JsonArray();
         for (PoolState pool : pools) {
             if (pool.isNew) {
@@ -676,13 +879,20 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             status = Component.literal("The table is already empty.").withStyle(ChatFormatting.GRAY);
             return;
         }
-        boolean removedExisting = pools.stream().anyMatch(pool -> !pool.isNew && !pool.injected);
-        pools.removeIf(pool -> !pool.injected);
+        if (tableLocked) {
+            status = lockedStatus();
+            return;
+        }
+        boolean removedExisting = pools.stream().anyMatch(pool -> !pool.isNew && ownPool(pool));
+        pools.removeIf(LootTableEditorScreen::ownPool);
         if (removedExisting) {
             dirtyExisting = true;
         }
         status = Component.literal("All pools removed — 'Save table' makes it permanent, "
-                + "Reload brings them back.").withStyle(ChatFormatting.YELLOW);
+                + "Reload brings them back."
+                + (pools.stream().anyMatch(pool -> pool.ruleSource != null)
+                ? " Pools from config rules stay (they belong to their rule files)." : ""))
+                .withStyle(ChatFormatting.YELLOW);
         rebuildWidgets();
     }
 
@@ -723,7 +933,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 .tooltip(Tooltip.create(Component.literal("Click to pick another loot table")))
                 .build());
 
-        panelTop = top + 24;
+        stripY = top + 24;
+        panelTop = stripY + stripLines() * 12 + (stripLines() > 0 ? 2 : 0);
         invLeft = Math.max(4, contentLeft - INV_COLS * 18 - 16);
         invTop = Math.max(top, (height - INV_ROWS * 18) / 2);
 
@@ -750,9 +961,14 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                         "Save only the pools you added here, appended to the table.\nThe table's own "
                                 + "loot stays as its mod ships it (survives mod updates).")))
                 .build();
-        savePools.active = hasNewPools;
+        savePools.active = hasNewPools && !tableLocked;
+        saveTable.active = !tableLocked;
         addRenderableWidget(savePools);
-        addRenderableWidget(Button.builder(Component.literal("Add pool"), b -> {
+        Button addPool = addRenderableWidget(Button.builder(Component.literal("Add pool"), b -> {
+                    if (tableLocked) {
+                        status = lockedStatus();
+                        return;
+                    }
                     PoolState pool = new PoolState();
                     pool.source = new JsonObject();
                     pool.isNew = true;
@@ -765,12 +981,14 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                         "A pool rolls its item list 'rolls' times; each roll picks ONE entry by weight")))
                 .build());
         y += 24;
-        addRenderableWidget(Button.builder(Component.literal("Empty table"), b -> emptyTable())
+        addPool.active = !tableLocked;
+        Button empty = addRenderableWidget(Button.builder(Component.literal("Empty table"), b -> emptyTable())
                 .bounds(contentLeft, y, buttonW, 20)
                 .tooltip(Tooltip.create(Component.literal(
                         "Remove all pools, so the table drops nothing.\nOnly a local edit — "
                                 + "'Save table' makes it permanent, Reload undoes it.")))
                 .build());
+        empty.active = !tableLocked;
         addRenderableWidget(Button.builder(Component.literal("Reload"), b -> {
                     scrollOffset = 0;
                     status = Component.empty();
@@ -798,8 +1016,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     }
 
     /** Slot count of a pool's grid; injected pools have no add-slot. */
-    private static int slotCount(PoolState pool) {
-        return pool.entries.size() + (pool.injected ? 0 : 1);
+    private int slotCount(PoolState pool) {
+        return pool.entries.size() + (frozen(pool) ? 0 : 1);
     }
 
     private int poolHeight(PoolState pool) {
@@ -857,7 +1075,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
         for (int p = 0; p < pools.size(); p++) {
             int y = poolY(p);
-            int x = panelLeft + 6 + font.width("Pool " + (p + 1)) + 6;
+            int x = panelLeft + 6 + font.width(poolLabel(p)) + 6;
             if (mouseX >= x && mouseX < x + font.width(rollsText(pools.get(p))) + 4
                     && mouseY >= y && mouseY < y + 11) {
                 return p;
@@ -874,7 +1092,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         for (int p = 0; p < pools.size(); p++) {
             int y = poolY(p);
             if (mouseY >= y && mouseY < y + poolHeight(pools.get(p))) {
-                return pools.get(p).injected ? -1 : p;
+                return frozen(pools.get(p)) ? -1 : p;
             }
         }
         return -1;
@@ -889,7 +1107,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             int y = poolY(p);
             int x = panelLeft + PANEL_W - 15;
             if (mouseX >= x && mouseX < x + 10 && mouseY >= y && mouseY < y + 11) {
-                return pools.get(p).injected ? -1 : p; // injected pools have no cross
+                return frozen(pools.get(p)) ? -1 : p; // read-only pools have no cross
             }
         }
         return -1;
@@ -900,6 +1118,17 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 && mouseY >= panelTop && mouseY < panelTop + panelHeight;
     }
 
+    private String poolLabel(int index) {
+        PoolState pool = pools.get(index);
+        if (pool.injected) {
+            return "Injected";
+        }
+        if (pool.ruleSource != null) {
+            return pool.generatedNote != null ? "Generated" : "Rule";
+        }
+        return "Pool " + (index + 1);
+    }
+
     private String rollsText(PoolState pool) {
         if (pool.rollsLocked) {
             return "rolls: custom";
@@ -907,6 +1136,137 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         return "rolls: " + (pool.rollsMin == pool.rollsMax ? String.valueOf(pool.rollsMin)
                 : pool.rollsMin + "-" + pool.rollsMax);
     }
+
+    // --- owner line and table function chips --------------------------------
+
+    /** Lines above the pools: who owns the table, then its table-level functions (if any). */
+    private int stripLines() {
+        return (ownerSource != null ? 1 : 0) + (tableFunctions().isEmpty() && injectedFunctions.isEmpty() ? 0 : 1);
+    }
+
+    /** The table's own top-level functions (part of its JSON). */
+    private List<JsonObject> tableFunctions() {
+        List<JsonObject> list = new ArrayList<>();
+        if (tableSource.get("functions") instanceof JsonArray functions) {
+            for (JsonElement element : functions) {
+                if (element instanceof JsonObject fn) {
+                    list.add(fn);
+                }
+            }
+        }
+        return list;
+    }
+
+    private String ownerText() {
+        String what = "remove".equals(ownerKind) ? "Emptied by " : ownerGenerated != null ? "Generated: " : "From ";
+        return what + shortFile(ownerSource);
+    }
+
+    private static Component functionLabel(JsonObject fn) {
+        String id = fn.get("function") instanceof JsonPrimitive p && p.isString() ? normalizeId(p.getAsString()) : "?";
+        LootEditorExtensions.TableFunction ext = LootEditorExtensions.tableFunction(id);
+        if (ext != null) {
+            return ext.label(fn);
+        }
+        return Component.literal(id.startsWith("minecraft:") ? id.substring("minecraft:".length()) : id);
+    }
+
+    private List<Component> functionTooltip(JsonObject fn, boolean injected) {
+        List<Component> lines = new ArrayList<>();
+        String id = fn.get("function") instanceof JsonPrimitive p && p.isString() ? normalizeId(p.getAsString()) : "?";
+        lines.add(Component.literal("Table function: " + id));
+        LootEditorExtensions.TableFunction ext = LootEditorExtensions.tableFunction(id);
+        if (ext != null) {
+            lines.addAll(ext.tooltip(fn));
+        }
+        if (injected) {
+            lines.add(Component.literal("Added to the table at load by " + id.split(":", 2)[0]
+                    + " — controlled by that mod's config, read-only here.").withStyle(ChatFormatting.LIGHT_PURPLE));
+        } else if (tableLocked) {
+            lines.add(lockedStatus());
+        } else {
+            lines.add(Component.literal("Part of the table's JSON — applies to everything it drops. "
+                    + "Click to remove it ('Save table' makes that permanent).").withStyle(ChatFormatting.GRAY));
+        }
+        return lines;
+    }
+
+    /** Draws the strip; returns the tooltip of the hovered chip or line, or null. */
+    private List<Component> renderStrip(GuiGraphics graphics, int mouseX, int mouseY) {
+        chipBoxes.clear();
+        List<Component> tooltip = null;
+        int y = stripY + 1;
+        int left = panelLeft;
+        int right = panelLeft + PANEL_W;
+        if (ownerSource != null) {
+            String text = font.plainSubstrByWidth(ownerText(), PANEL_W);
+            graphics.drawString(font, text, left, y, ownerGenerated != null ? 0xFFE0A040 : 0xFFA0C0FF, true);
+            if (mouseY >= y - 1 && mouseY < y + 10 && mouseX >= left && mouseX < left + font.width(text)) {
+                tooltip = new ArrayList<>();
+                tooltip.add(Component.literal(("remove".equals(ownerKind) ? "A remove rule in " : "An add rule in ")
+                        + "config/datarewriter/" + ownerSource
+                        + ("remove".equals(ownerKind) ? " empties this table." : " defines this whole table.")));
+                if (ownerGenerated != null) {
+                    tooltip.add(Component.literal("Generated — " + changeHint(ownerGenerated)
+                            + ". Read-only here.").withStyle(ChatFormatting.GOLD));
+                } else if (!GUI_FILE.equals(ownerSource)) {
+                    tooltip.add(Component.literal("'Save table' writes the editor's own replacement; whichever "
+                            + "file loads later wins on reload.").withStyle(ChatFormatting.GRAY));
+                }
+            }
+            y += 12;
+        }
+        List<JsonObject> own = tableFunctions();
+        if (own.isEmpty() && injectedFunctions.isEmpty()) {
+            return tooltip;
+        }
+        int x = left;
+        for (int i = 0; i < own.size() + injectedFunctions.size(); i++) {
+            boolean injected = i >= own.size();
+            JsonObject fn = injected ? injectedFunctions.get(i - own.size()) : own.get(i);
+            String label = functionLabel(fn).getString() + (injected || tableLocked ? "" : " ✕");
+            if (x + 24 > right) {
+                graphics.drawString(font, "…", x, y, 0xFFC0C0C0, true);
+                break;
+            }
+            if (x + font.width(label) + 6 > right) {
+                label = font.plainSubstrByWidth(label, right - x - 6 - font.width("…")) + "…";
+            }
+            int w = font.width(label) + 6;
+            int bg = injected ? 0xFF5A2A6A : tableLocked ? 0xFF505050 : 0xFF2A4A6A;
+            graphics.fill(x, y - 1, x + w, y + 10, bg);
+            graphics.drawString(font, label, x + 3, y, 0xFFFFFFFF, false);
+            chipBoxes.add(new int[]{x, y - 1, x + w, y + 10, injected ? -1 : i});
+            if (mouseX >= x && mouseX < x + w && mouseY >= y - 1 && mouseY < y + 10) {
+                tooltip = functionTooltip(fn, injected);
+            }
+            x += w + 3;
+        }
+        return tooltip;
+    }
+
+    /** A click on an own table-function chip removes that function; true when the click hit a chip. */
+    private boolean clickChip(double mouseX, double mouseY) {
+        for (int[] box : chipBoxes) {
+            if (mouseX >= box[0] && mouseX < box[2] && mouseY >= box[1] && mouseY < box[3]) {
+                if (box[4] >= 0 && !tableLocked && tableSource.get("functions") instanceof JsonArray functions
+                        && box[4] < functions.size()) {
+                    functions.remove(box[4]);
+                    if (functions.isEmpty()) {
+                        tableSource.remove("functions");
+                    }
+                    dirtyExisting = true;
+                    status = Component.literal("Table function removed — 'Save table' makes it permanent.")
+                            .withStyle(ChatFormatting.YELLOW);
+                    rebuildWidgets();
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final String GUI_FILE = net.ledok.datarewriter.config.GuiLootSaver.FILE_NAME;
 
     // --- rendering --------------------------------------------------------
 
@@ -925,7 +1285,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         graphics.fill(panelLeft, bottom - 1, right, bottom, 0xFF555555);
         graphics.fill(right - 1, panelTop, right, bottom, 0xFF555555);
 
-        List<Component> tooltip = null;
+        List<Component> tooltip = renderStrip(graphics, mouseX, mouseY);
         graphics.enableScissor(panelLeft, panelTop, right, bottom);
         if (loading) {
             graphics.drawCenteredString(font, Component.literal("Loading table from the server…"),
@@ -938,24 +1298,29 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         for (int p = 0; p < pools.size(); p++) {
             PoolState pool = pools.get(p);
             int headerY = poolY(p);
-            String label = pool.injected ? "Injected" : "Pool " + (p + 1);
+            String label = poolLabel(p);
             graphics.drawString(font, label, panelLeft + 6, headerY + 1,
-                    pool.injected ? 0x8040A0 : 0x404040, false);
+                    pool.injected ? 0x8040A0 : pool.ruleSource == null ? 0x404040
+                            : pool.generatedNote != null ? 0xA05A10 : 0x2F5F9F, false);
             int rollsX = panelLeft + 6 + font.width(label) + 6;
             boolean rollsHover = rollsAt(mouseX, mouseY) == p;
             graphics.drawString(font, rollsText(pool), rollsX, headerY + 1,
-                    pool.injected ? 0x808080
+                    frozen(pool) ? 0x808080
                             : rollsHover ? 0x1F5FBF : pool.rollsLocked ? 0x808080 : 0x2F6F2F, false);
             if (pool.injected) {
                 if (!pool.injectedBy.isEmpty()) {
                     graphics.drawString(font, "by " + pool.injectedBy + "?",
                             rollsX + font.width(rollsText(pool)) + 6, headerY + 1, 0x808080, false);
                 }
+            } else if (pool.ruleSource != null) {
+                int fileX = rollsX + font.width(rollsText(pool)) + 6;
+                String file = font.plainSubstrByWidth(shortFile(pool.ruleSource), panelLeft + PANEL_W - 8 - fileX);
+                graphics.drawString(font, file, fileX, headerY + 1, 0x707070, false);
             } else if (pool.isNew) {
                 int newX = rollsX + font.width(rollsText(pool)) + 6;
                 graphics.drawString(font, "(added)", newX, headerY + 1, 0xB08020, false);
             }
-            if (!pool.injected) {
+            if (!frozen(pool)) {
                 boolean deleteHover = poolDeleteAt(mouseX, mouseY) == p;
                 graphics.drawString(font, "✕", panelLeft + PANEL_W - 13, headerY + 1,
                         deleteHover ? 0xFF3333 : 0x803333, false);
@@ -971,7 +1336,11 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                         Component.literal("#tags from the mod's config are expanded into the "
                                 + "individual items shown here.")
                                 .withStyle(ChatFormatting.GRAY));
-            } else if (rollsHover && !pool.rollsLocked && !pool.injected) {
+            } else if (pool.ruleSource != null && rollsHover) {
+                tooltip = rulePoolLines(pool);
+            } else if (tableLocked && rollsHover) {
+                tooltip = List.of(lockedStatus());
+            } else if (rollsHover && !pool.rollsLocked && !frozen(pool)) {
                 tooltip = List.of(
                         Component.literal("How many entries this pool hands out"),
                         Component.literal("Scroll: rolls ±1 (Shift: max only — makes a range)")
@@ -981,7 +1350,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             } else if (rollsHover) {
                 tooltip = List.of(Component.literal("This pool uses a rolls formula the editor "
                         + "can't show — preserved as-is (edit in the config)"));
-            } else if (!pool.injected && poolDeleteAt(mouseX, mouseY) == p) {
+            } else if (!frozen(pool) && poolDeleteAt(mouseX, mouseY) == p) {
                 tooltip = List.of(Component.literal("Delete this pool")
                         .withStyle(ChatFormatting.RED));
             }
@@ -1164,6 +1533,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             case EMPTY -> new ItemStack(Items.STRUCTURE_VOID);
             case COMPOSITE -> new ItemStack(Items.BUNDLE);
             case TABLE_REF -> new ItemStack(Items.CHEST);
+            case CUSTOM -> customType(entry) != null ? customType(entry).icon(entry.source)
+                    : new ItemStack(complexIcon(entry));
             case COMPLEX -> new ItemStack(complexIcon(entry));
         };
         graphics.renderItem(icon, x, y);
@@ -1173,6 +1544,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     : entry.countMin + "-" + entry.countMax;
         } else if (entry.kind == Kind.COMPOSITE) {
             decoration = String.valueOf(entry.children.size());
+        } else if (entry.kind == Kind.CUSTOM && customType(entry) != null) {
+            decoration = customType(entry).badge(entry.source);
         }
         graphics.renderItemDecorations(font, icon, x, y, decoration == null ? "" : decoration);
         if (entry.weight != 1) {
@@ -1212,6 +1585,12 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
     }
 
+    static LootEditorExtensions.EntryType customType(EntryState entry) {
+        String type = entry.source.get("type") instanceof JsonPrimitive p && p.isString()
+                ? normalizeId(p.getAsString()) : "";
+        return LootEditorExtensions.entryType(type);
+    }
+
     private static Item complexIcon(EntryState entry) {
         String type = entry.source.get("type") instanceof JsonPrimitive p && p.isString()
                 ? normalizeId(p.getAsString()) : "";
@@ -1242,8 +1621,36 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         };
     }
 
+    /** Where a rule pool comes from, and where to change it. */
+    private static List<Component> rulePoolLines(PoolState pool) {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal("Added by a modify rule in config/datarewriter/" + pool.ruleSource)
+                .withStyle(pool.generatedNote != null ? ChatFormatting.GOLD : ChatFormatting.BLUE));
+        if (pool.generatedNote != null) {
+            lines.add(Component.literal("That file is generated — " + changeHint(pool.generatedNote) + ".")
+                    .withStyle(ChatFormatting.GRAY));
+        } else {
+            lines.add(Component.literal("Edit it in that file — the rule may add it to many tables.")
+                    .withStyle(ChatFormatting.GRAY));
+        }
+        lines.add(Component.literal("Read-only here and never saved with this table: the rule adds it "
+                + "again on every load.").withStyle(ChatFormatting.GRAY));
+        return lines;
+    }
+
+    /** "falleneden_loot/chests.json5" → "chests.json5". */
+    private static String shortFile(String file) {
+        int slash = file.lastIndexOf('/');
+        return slash >= 0 ? file.substring(slash + 1) : file;
+    }
+
     private List<Component> entryTooltip(PoolState pool, EntryState entry) {
         List<Component> lines = new ArrayList<>();
+        if (pool.ruleSource != null) {
+            lines.addAll(rulePoolLines(pool));
+        } else if (tableLocked) {
+            lines.add(lockedStatus());
+        }
         if (entry.injected && !pool.injected) {
             lines.add(Component.literal("Merged into this pool at runtime by another mod"
                     + (entry.injectedBy.isEmpty() ? "" : " — looks like '" + entry.injectedBy + "'"))
@@ -1308,6 +1715,15 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 lines.add(Component.literal("Click to pick a different table")
                         .withStyle(ChatFormatting.GRAY));
             }
+            case CUSTOM -> {
+                LootEditorExtensions.EntryType ext = customType(entry);
+                if (ext != null) {
+                    lines.addAll(ext.tooltip(entry.source));
+                }
+                if (!frozen(pool)) {
+                    lines.add(Component.literal("Click to edit").withStyle(ChatFormatting.GRAY));
+                }
+            }
             case COMPLEX -> {
                 String type = entry.source.get("type") instanceof JsonPrimitive p && p.isString()
                         ? p.getAsString() : "?";
@@ -1341,7 +1757,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                         + "(a random_chance condition)").withStyle(ChatFormatting.AQUA));
             }
         }
-        if (!pool.injected) {
+        if (!frozen(pool)) {
             lines.add(Component.literal("Scroll: weight — Shift: count — Ctrl: count max — Alt: chance")
                     .withStyle(ChatFormatting.GRAY));
             lines.add(Component.literal("Middle-click: exact weight"
@@ -1409,6 +1825,9 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
             cursorItem = null;
             return true;
         }
+        if (button == 0 && clickChip(mouseX, mouseY)) {
+            return true;
+        }
         if (button == 0) {
             int barValue = scrollBar.mouseClicked(mouseX, mouseY);
             if (barValue >= 0) {
@@ -1439,7 +1858,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         }
         int rollsPool = rollsAt(mouseX, mouseY);
         if (rollsPool >= 0 && button == 2 && !pools.get(rollsPool).rollsLocked
-                && !pools.get(rollsPool).injected) {
+                && !frozen(pools.get(rollsPool))) {
             assert minecraft != null;
             PoolState pool = pools.get(rollsPool);
             // The min dialog closes into the max dialog (AmountInputScreen
@@ -1480,6 +1899,16 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     .withStyle(ChatFormatting.LIGHT_PURPLE);
             return true;
         }
+        if (pool.ruleSource != null) {
+            status = Component.literal("This pool comes from config/datarewriter/" + pool.ruleSource + " — "
+                    + (pool.generatedNote != null ? "generated: " + changeHint(pool.generatedNote)
+                    : "edit it in that file") + ".").withStyle(ChatFormatting.BLUE);
+            return true;
+        }
+        if (tableLocked) {
+            status = lockedStatus();
+            return true;
+        }
         boolean addSlot = hit[1] == pool.entries.size();
         if (!addSlot && pool.entries.get(hit[1]).injected) {
             EntryState injectedEntry = pool.entries.get(hit[1]);
@@ -1506,6 +1935,8 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                 if (entry.kind == Kind.COMPOSITE) {
                     assert minecraft != null;
                     minecraft.setScreen(new CompositeEntryScreen(this, entry, () -> markEdited(pool)));
+                } else if (entry.kind == Kind.CUSTOM) {
+                    editCustom(pool, pool.entries.size() - 1);
                 }
             }));
             return true;
@@ -1574,10 +2005,29 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
                     entry.ref = tableRef;
                     markEdited(pool);
                 }));
+            } else if (pool.entries.get(hit[1]).kind == Kind.CUSTOM) {
+                editCustom(pool, hit[1]);
             }
             return true;
         }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    /** Opens a registered entry type's sub-editor; its result replaces the entry. */
+    private void editCustom(PoolState pool, int index) {
+        EntryState entry = pool.entries.get(index);
+        LootEditorExtensions.EntryType ext = customType(entry);
+        if (ext == null) {
+            return;
+        }
+        syncEntry(entry);
+        assert minecraft != null;
+        minecraft.setScreen(ext.edit(this, entry.source.deepCopy(), edited -> {
+            if (index < pool.entries.size() && pool.entries.get(index) == entry) {
+                pool.entries.set(index, parseEntry(edited));
+                markEdited(pool);
+            }
+        }));
     }
 
     /** Entries an item/tag can be placed into; composites and refs are edited by clicking. */
@@ -1590,7 +2040,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         if (ref == null || ref.isEmpty()) {
             return;
         }
-        if (pool.injected) {
+        if (frozen(pool)) {
             return;
         }
         EntryState entry;
@@ -1656,7 +2106,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         int rollsPool = rollsAt(mouseX, mouseY);
         if (rollsPool >= 0) {
             PoolState pool = pools.get(rollsPool);
-            if (!pool.rollsLocked && !pool.injected) {
+            if (!pool.rollsLocked && !frozen(pool)) {
                 if (hasShiftDown()) {
                     pool.rollsMax = Math.max(pool.rollsMin, Math.min(999, pool.rollsMax + direction));
                 } else {
@@ -1670,7 +2120,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         int[] hit = entryAt(mouseX, mouseY);
         if (hit != null && hit[1] < pools.get(hit[0]).entries.size()) {
             PoolState pool = pools.get(hit[0]);
-            if (pool.injected) {
+            if (frozen(pool)) {
                 return true; // read-only: swallow the scroll, no edits
             }
             EntryState entry = pool.entries.get(hit[1]);
@@ -1744,7 +2194,7 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         int[] hit = entryAt(x, y);
         if (hit != null) {
             PoolState pool = pools.get(hit[0]);
-            if (pool.injected
+            if (frozen(pool)
                     || (hit[1] < pool.entries.size() && !isItemPlaceable(pool.entries.get(hit[1])))) {
                 return false;
             }
@@ -1823,13 +2273,18 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
         // clears any stale draft (Save went through, or nothing changed).
         if (!loading) {
             boolean dirty = dirtyExisting
-                    || pools.stream().anyMatch(pool -> pool.isNew && !pool.injected);
+                    || pools.stream().anyMatch(pool -> pool.isNew && ownPool(pool));
             if (dirty) {
-                List<Boolean> newFlags = pools.stream()
-                        .filter(pool -> !pool.injected)
-                        .map(pool -> pool.isNew)
-                        .toList();
-                DRAFTS.put(tableId, new Draft(buildTableJson().toString(), newFlags, dirtyExisting));
+                List<PoolState> kept = pools.stream().filter(pool -> !pool.injected).toList();
+                List<Boolean> newFlags = kept.stream().map(pool -> pool.isNew).toList();
+                List<String> ruleSources = new ArrayList<>();
+                List<String> notes = new ArrayList<>();
+                for (PoolState pool : kept) {
+                    ruleSources.add(pool.ruleSource);
+                    notes.add(pool.generatedNote);
+                }
+                DRAFTS.put(tableId, new Draft(buildDraftJson().toString(), newFlags, dirtyExisting,
+                        ruleSources, notes));
             } else {
                 DRAFTS.remove(tableId);
             }
@@ -1840,6 +2295,6 @@ public class LootTableEditorScreen extends AbstractContainerScreen<LootEditorMen
     @Override
     public void onClose() {
         assert minecraft != null;
-        minecraft.setScreen(null);
+        minecraft.setScreen(returnOnClose ? parent : null);
     }
 }

@@ -42,6 +42,8 @@ public final class GuiLootSaver {
         return update(root -> {
             JsonObject loot = lootSection(root);
             removeEntriesWithId(array(loot, "remove"), "id", tableId);
+            // Pools saved earlier with "Save new pools" are part of the table the editor sends now.
+            removeEntriesWithId(array(loot, "modify"), "id", tableId);
             JsonArray add = array(loot, "add");
             removeEntriesWithId(add, "id", tableId);
             JsonObject entry = new JsonObject();
@@ -57,11 +59,18 @@ public final class GuiLootSaver {
      * Saves pools appended to a table as a 'modify' entry targeting exactly
      * that table (one per table id — saving again replaces it).
      */
+    /** Appends pools to the table's {@code modify} rule in this file (one rule per table). */
     public static String saveModify(String tableId, JsonArray pools) {
         return update(root -> {
             JsonObject loot = lootSection(root);
             JsonArray modify = array(loot, "modify");
-            removeEntriesWithId(modify, "id", tableId);
+            for (JsonElement e : modify) {
+                if (e instanceof JsonObject obj && hasStringValue(obj, "id", tableId)
+                        && obj.get("pools") instanceof JsonArray existing) {
+                    existing.addAll(pools);
+                    return;
+                }
+            }
             JsonObject entry = new JsonObject();
             entry.addProperty("id", tableId);
             entry.add("pools", pools);

@@ -1,7 +1,8 @@
 # DataRewriter addon API
 
 Other mods can feed DataRewriter **rules from code**, react when **recipes or loot tables change**, and ship
-**recipe editor layouts** for their own recipe types. The API is loader-agnostic and small:
+**recipe editor layouts** for their own recipe types, and teach the **loot table editor** their own loot
+entry types and table functions. The API is loader-agnostic and small:
 `net.ledok.datarewriter.api` plus `EditorLayouts` on the client. Rules from code go through exactly the
 same pipeline as the config files, so everything the [README](README.md) says about a rule — wildcards,
 `#tags`, table scopes, when tag rules apply, how the editors interact with rules — holds for its
@@ -147,8 +148,35 @@ For layouts that need more than JSON can say — custom drawing under the slots,
 for a slot's value — the `EditorLayout` constructor, `EditorLayout.decoration` and `SlotValueBuilder`
 are public; the bundled Create layouts (`CreateLayouts`) are the reference for both.
 
+## Loot table editor: entry types and table functions (client)
+
+A mod with its own loot pool entry type or table function can teach the
+[loot table editor](README.md#loot-table-editor) about it. Unregistered, an entry shows as a locked slot and a
+table function as a plain chip — both are still preserved on save. From `registerClient()`:
+
+```java
+LootEditorExtensions.registerEntryType("myaddon:level_table", new LootEditorExtensions.EntryType() {
+    @Override public String displayName() { return "Level table"; }
+    @Override public ItemStack icon(JsonObject entry) { return new ItemStack(Items.CHEST); }
+    @Override public String badge(JsonObject entry) { return "1-5"; }            // optional, slot corner text
+    @Override public List<Component> tooltip(JsonObject entry) { return List.of(Component.literal("…")); }
+    @Override public Screen edit(Screen parent, JsonObject entry, Consumer<JsonObject> done) {
+        return new MyEntryScreen(parent, entry, done);   // call done(editedJson), then return to parent
+    }
+    @Override public String validate(JsonObject entry) { return null; }        // optional: error text blocks saving
+    @Override public JsonObject create() { return null; }                      // optional: offer it in the "+" menu
+});
+LootEditorExtensions.registerTableFunction("myaddon:scaling",
+        function -> Component.literal("My scaling"));                         // chip label (+ optional tooltip)
+```
+
+`entry` is a copy of the entry's JSON (its weight, conditions and functions included); whatever `done`
+receives replaces the entry. DataRewriter's own support for DD Loot Stage's `loot_stage:level_table` and
+Dungeon Difficulty's `local_scaling` (`BundledLootExtensions`, `LevelTableScreen`) is the worked example; a
+registration for the same id replaces a bundled one.
+
 ## Stability
 
 The shapes above — entrypoints, `RewriteRules.Builder`, the two event lists, `EditorLayouts.register` /
-`hide` with `EditorLayout.fromJson` — are the intended long-term surface. The `RewriteConfig` records the
+`hide` with `EditorLayout.fromJson`, `LootEditorExtensions` — are the intended long-term surface. The `RewriteConfig` records the
 builder produces are internal and may still change between minor versions.

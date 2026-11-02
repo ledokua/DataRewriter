@@ -49,7 +49,16 @@ public class SpecialEntryScreen extends Screen {
                 .tooltip(Tooltip.create(Component.literal(
                         "One roll of another loot table, dropped here")))
                 .build());
-        y += 30;
+        y += 24;
+        // Entry types other mods registered with the editor (a level table, say).
+        for (var type : LootEditorExtensions.creatableEntryTypes().values()) {
+            addRenderableWidget(Button.builder(Component.literal(type.displayName() + "…"),
+                            b -> deliver(LootTableEditorScreen.newCustom(type.create())))
+                    .bounds(left, y, w, 20)
+                    .build());
+            y += 24;
+        }
+        y += 6;
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
                 .bounds(left + (w - 80) / 2, y, 80, 20)
                 .build());

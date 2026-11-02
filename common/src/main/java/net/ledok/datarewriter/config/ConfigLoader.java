@@ -11,6 +11,7 @@ import net.ledok.datarewriter.Datarewriter;
 import net.ledok.datarewriter.api.RewriteRules;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.helpers.MessageFormatter;
 
 import java.io.IOException;
@@ -19,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.stream.Stream;
 
@@ -40,6 +42,7 @@ public final class ConfigLoader {
     public static RewriteConfig load() {
         errors = 0;
         issues.clear();
+        generatedFiles.clear();
         Path dir = Platform.INSTANCE.configDir().resolve(Datarewriter.MOD_ID);
         try {
             if (!Files.isDirectory(dir)) {
@@ -230,6 +233,16 @@ public final class ConfigLoader {
     }
 
     private static volatile List<FileSummary> lastFiles = List.of();
+    /** Files of the current load marked {@code generated}, with what they are generated from ("" = not said). */
+    private static final Map<String, String> generatedFiles = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * What a config file is generated from (its top-level {@code generated} key), "" when it only says
+     * {@code true}, or null for a hand-written file. Editors keep generated loot read-only.
+     */
+    public static @Nullable String generatedNote(String fileName) {
+        return generatedFiles.get(fileName);
+    }
     private static volatile String lastDir = "";
 
     /** Files read by the last config load, in load order (later files win on the same id). */
@@ -329,10 +342,25 @@ public final class ConfigLoader {
             }
         }
 
+        if (root.has("generated")) {
+            // Made by a tool: the editors show this file's loot read-only and point at the source.
+            if (root.get("generated") instanceof JsonPrimitive p && p.isString() && !p.getAsString().isBlank()) {
+                generatedFiles.put(fileName, p.getAsString().trim());
+            } else if (root.get("generated") instanceof JsonPrimitive p && p.isBoolean()) {
+                if (p.getAsBoolean()) {
+                    generatedFiles.put(fileName, "");
+                }
+            } else {
+                warn("[{}] 'generated' must be true or a short text naming what the file is generated from",
+                        fileName);
+            }
+        }
+
         for (String key : root.keySet()) {
             if (key.equals("remove") || key.equals("add")) {
                 error("[{}] '{}' must be inside a 'recipes: { ... }' section, ignoring it", fileName, key);
-            } else if (!List.of("recipes", "loot_tables", "registries", "items", "worldgen").contains(key)) {
+            } else if (!List.of("recipes", "loot_tables", "registries", "items", "worldgen", "generated")
+                    .contains(key)) {
                 warn("[{}] Unknown section '{}' (expected 'recipes', 'loot_tables', 'registries', 'items' "
                         + "or 'worldgen')", fileName, key);
             }

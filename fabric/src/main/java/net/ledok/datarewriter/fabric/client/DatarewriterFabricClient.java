@@ -43,6 +43,8 @@ public final class DatarewriterFabricClient implements ClientModInitializer {
                 (payload, context) -> DatarewriterClient.onClipboard(context.client(), payload));
         ClientPlayNetworking.registerGlobalReceiver(LootPayloads.SaveResult.TYPE,
                 (payload, context) -> DatarewriterClient.onSaveResult(context.client(), payload));
+        ClientPlayNetworking.registerGlobalReceiver(LootPayloads.TableProvenance.TYPE,
+                (payload, context) -> DatarewriterClient.onTableProvenance(context.client(), payload));
         ClientPlayNetworking.registerGlobalReceiver(LootPayloads.TableContent.TYPE,
                 (payload, context) -> DatarewriterClient.onTableContent(context.client(), payload));
         ClientPlayNetworking.registerGlobalReceiver(RegistryPayloads.EntryContent.TYPE,

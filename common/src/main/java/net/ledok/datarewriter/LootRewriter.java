@@ -11,9 +11,11 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,6 +39,7 @@ public final class LootRewriter {
         for (RewriteConfig.AddedLootTable addition : loaded.lootAdditions()) {
             addedIds.add(addition.id());
         }
+        LootProvenance.Builder provenance = new LootProvenance.Builder();
 
         int removed = 0;
         if (!loaded.lootRemovals().isEmpty()) {
@@ -47,6 +50,7 @@ public final class LootRewriter {
                 for (RewriteConfig.LootRule rule : loaded.lootRemovals()) {
                     if (rule.matches(entry.getKey())) {
                         entry.setValue(new JsonObject()); // empty loot table
+                        provenance.owner(entry.getKey(), new LootProvenance.Owner("remove", rule.source()));
                         removed++;
                         break;
                     }
@@ -59,6 +63,7 @@ public final class LootRewriter {
             if (tableJsons.put(addition.id(), addition.json()) != null) {
                 replaced++;
             }
+            provenance.owner(addition.id(), new LootProvenance.Owner("add", addition.source()));
         }
 
         // Modifications run last and also apply to tables added above.
@@ -80,6 +85,8 @@ public final class LootRewriter {
                         pools = new JsonArray();
                         table.add("pools", pools);
                     }
+                    provenance.appended(entry.getKey(), pools.size(), modification.pools().size(),
+                            modification.target().source());
                     for (JsonElement pool : modification.pools()) {
                         pools.add(pool.deepCopy());
                     }
@@ -126,6 +133,7 @@ public final class LootRewriter {
 
         // The loot editor (networking) reads and updates this cache later.
         RewriteState.lootTableJsons = new HashMap<>(tableJsons);
+        provenance.install();
         RewriteState.runtimeTableJsons = new ConcurrentHashMap<>();
 
         if (removed + loaded.lootAdditions().size() + modified + itemsReplaced + itemsRemoved > 0) {
@@ -136,6 +144,45 @@ public final class LootRewriter {
                 Datarewriter.LOGGER.info("Loot tables added: {}", loaded.lootAdditions().stream()
                         .map(a -> a.id() + " (" + a.source() + ")")
                         .collect(java.util.stream.Collectors.joining(", ")));
+            }
+        }
+    }
+
+    /**
+     * The config's modify rules for one table, outside the loot editor's own file, appended to {@code table}
+     * in place — what a reload does after the table's own pools. Returns each appended pool's rule file.
+     * The editor's live saves use it, since they never send rule pools back.
+     */
+    public static List<String> appendRulePools(ResourceLocation tableId, JsonObject table) {
+        List<String> sources = new ArrayList<>();
+        JsonArray pools = table.get("pools") instanceof JsonArray existing ? existing : new JsonArray();
+        for (RewriteConfig.LootModification modification : RewriteState.config().lootModifications()) {
+            if (!modification.matches(tableId)
+                    || modification.target().source().equals(net.ledok.datarewriter.config.GuiLootSaver.FILE_NAME)) {
+                continue;
+            }
+            for (JsonElement pool : modification.pools()) {
+                pools.add(pool.deepCopy());
+                sources.add(modification.target().source());
+            }
+        }
+        if (!pools.isEmpty()) {
+            table.add("pools", pools);
+        }
+        return sources;
+    }
+
+    /** Every config item rule scoped to the table, applied to its JSON in place (live saves; tags are bound then). */
+    public static void applyItemRules(ResourceLocation tableId, JsonObject table) {
+        RewriteConfig config = RewriteState.config();
+        for (RewriteConfig.LootItemReplacement rule : config.lootItemReplacements()) {
+            if (rule.table() == null || rule.table().matches(tableId)) {
+                applyReplacement(table, rule);
+            }
+        }
+        for (RewriteConfig.LootItemRemoval rule : config.lootItemRemovals()) {
+            if (rule.table() == null || rule.table().matches(tableId)) {
+                applyRemoval(table, rule);
             }
         }
     }

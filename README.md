@@ -25,6 +25,7 @@ whole items out of the game and switch off worldgen features.
 | Edit rituals, enchantments or other datapack registries | [Datapack registries](#datapack-registries) | `registries.remove` / `modify` / `add` |
 | Edit recipes visually | [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) | `/recipeeditor`, `/recipetweaker` |
 | Edit loot tables visually (components included) | [Loot table editor](#loot-table-editor) | `/loottableeditor` |
+| Keep a tool-generated config file read-only in the editors | [Config files](#config-files) | top-level `generated: "…"` |
 | Make a modded recipe type editable | [Editor layouts](#editor-layouts--manual-override) | `config/datarewriter/editor-layouts/` |
 | See what's loaded or what went wrong | [Commands](#commands) · [Troubleshooting](#troubleshooting) | `/datarewriter status`, `/datarewriter errors` |
 | Contribute rules or layouts from another mod | [Addon API](#addon-api) | [`API.md`](API.md) |
@@ -99,6 +100,17 @@ rules see everything:
 
 Rules that match on a `#tag` (and every item rule) are applied once startup or `/reload` has finished
 rather than during loading, because item tags aren't bound yet at that point — the effect is the same.
+
+**Generated files.** A file made by a tool can say so with a top-level `generated` key — the text names what
+it is generated from (or `generated: true`):
+
+```json5
+{ generated: "Eden Loot Plan", loot_tables: { modify: [ ... ] } }
+```
+
+The rules work as usual; the [loot table editor](#loot-table-editor) just keeps that file's loot read-only
+and tells you where to change it ("generated — change the Eden Loot Plan"), so an in-game edit can't
+silently fight the next regeneration.
 
 ## Removing recipes
 
@@ -548,10 +560,28 @@ done to refresh EMI/JEI/REI. The screen remembers its slots and mode until the g
   Middle-click a pool's `+` slot to **create** one of these. Anything beyond that (inline nested tables,
   `dynamic` entries, custom conditions) still shows as a locked slot and is **preserved exactly as-is**,
   same for fancy count/chance formulas.
-- **Save table** stores the whole table as a replacement (also the only way to keep edits or deletions of
-  the table's *own* entries); with every pool deleted it saves an empty-table rule instead. **Save added
+- **Where each part comes from** is shown. The table's own pools (from its mod or datapack, or saved here
+  earlier) are labelled *Pool 1, 2, …* and are editable. Pools a config [`modify`](#loot-tables) rule
+  appends are labelled *Rule* (blue) with their file, or *Generated* (orange) when the file is
+  [generated](#config-files) — both are **read-only** and never saved with the table, because their rule
+  (which may cover hundreds of tables) adds them again on every load: change them in that file. A table
+  that a config `add` or `remove` rule owns says so above its pools ("From x.json5", "Emptied by
+  x.json5"); a **generated** table can't be edited or saved at all. *Injected* pools (purple) come from
+  other mods at runtime, see [below](#loot-injected-by-other-mods).
+- **Table functions** (loot functions on the whole table) show as chips above the pools: the table's own
+  can be removed (click the chip, then Save table); functions another mod adds at load — Dungeon
+  Difficulty's scaling, for one — are purple and read-only (that mod's config controls them).
+- **Other mods' loot elements** can bring their own slot and sub-editor (see [`API.md`](API.md)). Built in:
+  DD Loot Stage's **level table** (`loot_stage:level_table`, when the add-on is installed) shows as a chest
+  with its level range; click it to edit the level → table list (pick tables with the table picker, add or
+  remove levels, see which table a level rolls, open any of them), weight and quality — or create one from
+  a pool's middle-click menu. Dungeon Difficulty's `local_scaling` function shows as a "DD scaling" chip.
+- **Save table** stores the table's own pools as a replacement (also the only way to keep edits or
+  deletions of the table's *own* entries); with every pool deleted it saves an empty-table rule instead.
+  Rule pools are left out and stay with their rules — live, too: the server appends them again right
+  away. Pools saved earlier with *Save added pools* are folded into the replacement. **Save added
   pools** appends just your new pools, leaving the table's own loot to its mod — survives mod updates,
-  like config [`modify`](#loot-tables). **Empty table** removes all pools *locally* — nothing is saved
+  like config [`modify`](#loot-tables); saving more later adds to them. **Empty table** removes all pools *locally* — nothing is saved
   until you press Save table — and **Reload** discards unsaved edits and refetches the table.
 - **Unsaved edits survive closing the editor**: each table keeps its draft (per table id, until the game
   quits) and reopening the table restores it, clearly marked. Save makes a draft permanent, Reload throws
@@ -831,6 +861,8 @@ Where things live (all under `common/src/main/java/net/ledok/datarewriter/`):
 | Config parsing, validation, the generated example | `config/ConfigLoader.java`, rule records in `config/RewriteConfig.java` |
 | Recipe rules (JSON phase, parsed phase, ingredient swaps, disabled-item recipes) | `RecipeRewriter.java`, `mixin/RecipeManagerMixin.java` |
 | Loot rules (JSON phase, post-injection pass, live rebinds) | `LootRewriter.java`, `LootInjectionRewriter.java`, `LootLiveApplier.java` |
+| Loot editor provenance (rule / generated / own pools, table owners) and its live saves | `LootProvenance.java` (recorded by `LootRewriter.rewrite`), `network/LootEditNetworking.java` (`TableProvenance` payload, `OWN_POOLS_MARKER`), `ConfigLoader.generatedNote` |
+| Loot editor extensions (other mods' entry types / table functions) | `client/gui/LootEditorExtensions.java`; bundled DD Loot Stage + Dungeon Difficulty support in `BundledLootExtensions.java` / `LevelTableScreen.java` |
 | `items.disable` runtime: lookups, stack and trade conversion, client list | `DisabledItems.java`; mixins `TagLoaderMixin` (tags), `AbstractContainerMenuMixin` (slots), `ServerLevelMixin` / `ItemEntityMixin` (drops), `AbstractVillagerMixin` (trades), `PlayerListMixin` (sync), `CreativeModeTabMixin` + EMI plugin (client hiding) |
 | `worldgen.remove_features` | `RemovedFeatures.java`, `mixin/PlacedFeatureMixin.java` |
 | Datapack registries | `RegistryRewriter.java`, `RegistryLiveApplier.java`, `mixin/RegistryDataLoaderMixin.java` |

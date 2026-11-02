@@ -1,5 +1,7 @@
 package net.ledok.datarewriter.network;
 
+import net.ledok.datarewriter.config.ConfigLoader;
+import net.ledok.datarewriter.LootProvenance;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -26,6 +28,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.loot.entries.LootPoolEntries;
+import net.minecraft.world.level.storage.loot.functions.LootItemFunctions;
 import net.minecraft.resources.RegistryOps;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.world.level.storage.loot.LootTable;
@@ -85,8 +88,61 @@ public final class LootEditNetworking {
         ResourceLocation id = ResourceLocation.tryParse(payload.tableId());
         JsonElement json = id == null ? null : RewriteState.lootTableJsons.get(id);
         String injected = id == null ? "" : injectedPools(server, id, json);
+        // Ahead of the content, and only to editors that understand it (older clients lack the channel).
+        if (id != null && Network.INSTANCE.canSendToPlayer(player, LootPayloads.TableProvenance.TYPE)) {
+            JsonObject provenance = LootProvenance.describe(id, LootProvenance.poolCount(json));
+            provenance.add("injected_functions", injectedFunctions(server, id, json));
+            Network.INSTANCE.sendToPlayer(player,
+                    new LootPayloads.TableProvenance(payload.tableId(), provenance.toString()));
+        }
         Network.INSTANCE.sendToPlayer(player, new LootPayloads.TableContent(
                 payload.tableId(), json == null ? "" : json.toString(), injected));
+    }
+
+    /**
+     * Table-level loot functions the live table has but the cached JSON doesn't — added at load by other
+     * mods (Dungeon Difficulty's local_scaling, for one). Compared through the function codec, so a mod's
+     * own encoding of defaults doesn't count as a difference.
+     */
+    private static JsonArray injectedFunctions(MinecraftServer server, ResourceLocation id, JsonElement cached) {
+        JsonArray extra = new JsonArray();
+        LootTable table = server.reloadableRegistries().get().registryOrThrow(Registries.LOOT_TABLE).get(id);
+        JsonObject runtime = table == null ? null : runtimeTable(server, id, table);
+        if (runtime == null || !(runtime.get("functions") instanceof JsonArray live)) {
+            return extra;
+        }
+        Map<String, Integer> known = new HashMap<>();
+        if (cached instanceof JsonObject obj && obj.get("functions") instanceof JsonArray own) {
+            for (JsonElement fn : own) {
+                known.merge(canonicalFunction(server, fn), 1, Integer::sum);
+            }
+        }
+        for (JsonElement fn : live) {
+            String key = canonicalFunction(server, fn);
+            int left = known.getOrDefault(key, 0);
+            if (left > 0) {
+                known.put(key, left - 1);
+            } else {
+                extra.add(fn);
+            }
+        }
+        return extra;
+    }
+
+    private static String canonicalFunction(MinecraftServer server, JsonElement function) {
+        try {
+            RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
+            var parsed = LootItemFunctions.ROOT_CODEC.parse(ops, function).result();
+            if (parsed.isPresent()) {
+                var encoded = LootItemFunctions.ROOT_CODEC.encodeStart(ops, parsed.get()).result();
+                if (encoded.isPresent()) {
+                    return encoded.get().toString();
+                }
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return function.toString();
     }
 
     /** {@code SaveTable}: one chunk of a save; the save itself runs once every chunk has arrived. */
@@ -299,11 +355,24 @@ public final class LootEditNetworking {
         }
     }
 
+    /**
+     * Top-level key the editor adds to a "replace" save when it left out the pools config rules appended
+     * (stripped before anything is written).
+     */
+    public static final String OWN_POOLS_MARKER = "datarewriter:own_pools_only";
+
     private static void handleSave(MinecraftServer server, ServerPlayer player,
                                    String mode, String tableId, String json) {
         ResourceLocation id = ResourceLocation.tryParse(tableId);
         if (id == null) {
             fail(player, "'" + tableId + "' is not a valid loot table id");
+            return;
+        }
+        if (LootProvenance.generatedOwner(id)) {
+            LootProvenance.Owner owner = LootProvenance.owner(id);
+            String note = ConfigLoader.generatedNote(owner.source());
+            fail(player, "this table comes from " + owner.source() + ", which is generated"
+                    + (note == null || note.isEmpty() ? "" : " — change the " + note) + "; nothing was saved");
             return;
         }
         String error;
@@ -315,7 +384,15 @@ public final class LootEditNetworking {
                     fail(player, "the loot table must be a JSON object");
                     return;
                 }
-                LootLiveApplier.Parsed parsed = LootLiveApplier.parse(server, table);
+                // Editors that know about rule pools leave them out and say so; their rules append them
+                // again, live here and on every reload. (Older editors sent them along.)
+                boolean withoutRulePools = table.remove(OWN_POOLS_MARKER) != null;
+                JsonObject live = table.deepCopy();
+                List<String> rulePools = withoutRulePools ? LootRewriter.appendRulePools(id, live) : List.of();
+                if (withoutRulePools) {
+                    LootRewriter.applyItemRules(id, live);
+                }
+                LootLiveApplier.Parsed parsed = LootLiveApplier.parse(server, live);
                 if (parsed.error() != null) {
                     fail(player, parsed.error());
                     return;
@@ -323,9 +400,12 @@ public final class LootEditNetworking {
                 error = GuiLootSaver.saveReplace(tableId, table);
                 if (error == null) {
                     error = LootLiveApplier.bind(server, id, parsed.table());
-                    RewriteState.lootTableJsons.put(id, table);
+                    RewriteState.lootTableJsons.put(id, live);
+                    LootProvenance.savedWhole(id, "add",
+                            LootProvenance.poolCount(live) - rulePools.size(), rulePools);
                 }
-                applied = "saved (whole table)";
+                applied = "saved (whole table)" + (rulePools.isEmpty() ? ""
+                        : " — the " + rulePools.size() + " pool(s) from config rules stay with their rules");
             }
             case "modify" -> {
                 JsonElement parsedJson;
@@ -353,15 +433,20 @@ public final class LootEditNetworking {
                     fail(player, parsed.error());
                     return;
                 }
+                int before = LootProvenance.poolCount(current);
                 error = GuiLootSaver.saveModify(tableId, pools);
                 if (error == null) {
                     error = LootLiveApplier.bind(server, id, parsed.table());
                     RewriteState.lootTableJsons.put(id, merged);
+                    LootProvenance.savedAppended(id, before, pools.size());
                 }
                 applied = "new pools saved (table's own loot kept)";
             }
             case "remove" -> {
+                // Emptied, then the other files' modify rules append their pools again, like on a reload.
                 JsonObject empty = new JsonObject();
+                List<String> rulePools = LootRewriter.appendRulePools(id, empty);
+                LootRewriter.applyItemRules(id, empty);
                 LootLiveApplier.Parsed parsed = LootLiveApplier.parse(server, empty);
                 if (parsed.error() != null) {
                     fail(player, parsed.error());
@@ -371,8 +456,10 @@ public final class LootEditNetworking {
                 if (error == null) {
                     error = LootLiveApplier.bind(server, id, parsed.table());
                     RewriteState.lootTableJsons.put(id, empty);
+                    LootProvenance.savedWhole(id, "remove", 0, rulePools);
                 }
-                applied = "emptied (drops nothing now)";
+                applied = rulePools.isEmpty() ? "emptied (drops nothing now)"
+                        : "emptied — only the " + rulePools.size() + " pool(s) from config rules are left";
             }
             default -> {
                 fail(player, "unknown save mode '" + mode + "'");

@@ -1,5 +1,6 @@
 package net.ledok.datarewriter.client;
 
+import net.ledok.datarewriter.client.gui.BundledLootExtensions;
 import net.ledok.datarewriter.client.gui.LootTableEditorScreen;
 import net.ledok.datarewriter.client.gui.LootTablePickerScreen;
 import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
@@ -22,6 +23,7 @@ public final class DatarewriterClient {
 
     public static void init() {
         ScreenshotHarness.init();
+        BundledLootExtensions.register();
     }
 
     // A command can't open a screen directly — the chat screen closes after the command runs and would
@@ -83,6 +85,12 @@ public final class DatarewriterClient {
             editor.onSaveResult(payload.ok(), payload.message());
         } else if (client.screen instanceof RecipeTweaksScreen tweaks) {
             tweaks.onSaveResult(payload.ok(), payload.message());
+        }
+    }
+
+    public static void onTableProvenance(Minecraft client, LootPayloads.TableProvenance payload) {
+        if (client.screen instanceof LootTableEditorScreen editor && editor.tableId.equals(payload.tableId())) {
+            editor.onProvenance(payload.json());
         }
     }
 

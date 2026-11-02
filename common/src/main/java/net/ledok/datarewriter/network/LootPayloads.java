@@ -92,6 +92,24 @@ public final class LootPayloads {
     }
 
     /**
+     * S2C, sent just before {@link TableContent} (and only to clients that have this channel): where the
+     * table's parts come from — {@code LootProvenance.describe} plus {@code injected_functions}, the
+     * table-level functions other mods add at load.
+     */
+    public record TableProvenance(String tableId, String json) implements CustomPacketPayload {
+        public static final Type<TableProvenance> TYPE = new Type<>(id("loot_table_provenance"));
+        public static final StreamCodec<ByteBuf, TableProvenance> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.STRING_UTF8, TableProvenance::tableId,
+                ByteBufCodecs.stringUtf8(1_000_000), TableProvenance::json,
+                TableProvenance::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /**
      * C2S: save a loot table edit. mode is "replace" (json = whole table),
      * "modify" (json = array of pools to append) or "remove" (json = "").
      * Large JSON is split into parts; the server reassembles per player.

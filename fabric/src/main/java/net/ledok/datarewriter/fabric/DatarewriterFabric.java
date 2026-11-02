@@ -44,6 +44,7 @@ public final class DatarewriterFabric implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(LootPayloads.BulkItemEdit.TYPE, LootPayloads.BulkItemEdit.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.TableList.TYPE, LootPayloads.TableList.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.TableContent.TYPE, LootPayloads.TableContent.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(LootPayloads.TableProvenance.TYPE, LootPayloads.TableProvenance.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.SaveResult.TYPE, LootPayloads.SaveResult.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(LootPayloads.Clipboard.TYPE, LootPayloads.Clipboard.STREAM_CODEC);
         PayloadTypeRegistry.playC2S().register(RegistryPayloads.EntryRequest.TYPE, RegistryPayloads.EntryRequest.STREAM_CODEC);

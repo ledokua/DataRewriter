@@ -77,6 +77,7 @@ public final class DatarewriterNeoForge {
                 (p, ctx) -> LootEditNetworking.handleBulkItemEdit(server(ctx), player(ctx), p));
 
         r.playToClient(LootPayloads.TableList.TYPE, LootPayloads.TableList.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.tableList(p));
+        r.playToClient(LootPayloads.TableProvenance.TYPE, LootPayloads.TableProvenance.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.tableProvenance(p));
         r.playToClient(LootPayloads.TableContent.TYPE, LootPayloads.TableContent.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.tableContent(p));
         r.playToClient(LootPayloads.SaveResult.TYPE, LootPayloads.SaveResult.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.saveResult(p));
         r.playToClient(LootPayloads.Clipboard.TYPE, LootPayloads.Clipboard.STREAM_CODEC, (p, ctx) -> NeoForgeClientPayloads.clipboard(p));

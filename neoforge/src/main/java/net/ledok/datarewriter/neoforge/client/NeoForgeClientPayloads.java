@@ -13,6 +13,7 @@ public final class NeoForgeClientPayloads {
     public static void tableList(LootPayloads.TableList p) { DatarewriterClient.onTableList(Minecraft.getInstance(), p); }
     public static void clipboard(LootPayloads.Clipboard p) { DatarewriterClient.onClipboard(Minecraft.getInstance(), p); }
     public static void saveResult(LootPayloads.SaveResult p) { DatarewriterClient.onSaveResult(Minecraft.getInstance(), p); }
+    public static void tableProvenance(LootPayloads.TableProvenance p) { DatarewriterClient.onTableProvenance(Minecraft.getInstance(), p); }
     public static void tableContent(LootPayloads.TableContent p) { DatarewriterClient.onTableContent(Minecraft.getInstance(), p); }
     public static void registryEntry(RegistryPayloads.EntryContent p) { DatarewriterClient.onRegistryEntry(Minecraft.getInstance(), p); }
 }
