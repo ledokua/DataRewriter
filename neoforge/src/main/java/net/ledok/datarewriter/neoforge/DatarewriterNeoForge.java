@@ -15,6 +15,8 @@ import net.ledok.datarewriter.network.RecipeSaveNetworking;
 import net.ledok.datarewriter.network.RegistryEditNetworking;
 import net.ledok.datarewriter.network.RegistryPayloads;
 import net.ledok.datarewriter.network.SaveRecipePayload;
+import net.ledok.datarewriter.network.SuggestionPayloads;
+import net.ledok.datarewriter.suggest.RecipeSuggestions;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -89,6 +91,16 @@ public final class DatarewriterNeoForge {
                 (p, ctx) -> NeoForgeClientPayloads.registryEntry(p));
         r.playToClient(DisabledItemsPayload.TYPE, DisabledItemsPayload.STREAM_CODEC,
                 (p, ctx) -> DisabledItems.receive(p.items()));
+        r.playToClient(SuggestionPayloads.Access.TYPE, SuggestionPayloads.Access.STREAM_CODEC,
+                (p, ctx) -> NeoForgeClientPayloads.access(p));
+        r.playToServer(SuggestionPayloads.Suggest.TYPE, SuggestionPayloads.Suggest.STREAM_CODEC,
+                (p, ctx) -> RecipeSuggestions.handleSuggest(server(ctx), player(ctx), p));
+        r.playToClient(SuggestionPayloads.Review.TYPE, SuggestionPayloads.Review.STREAM_CODEC,
+                (p, ctx) -> NeoForgeClientPayloads.review(p));
+        r.playToServer(SuggestionPayloads.Decision.TYPE, SuggestionPayloads.Decision.STREAM_CODEC,
+                (p, ctx) -> RecipeSuggestions.handleDecision(server(ctx), player(ctx), p));
+        r.playToClient(SuggestionPayloads.Result.TYPE, SuggestionPayloads.Result.STREAM_CODEC,
+                (p, ctx) -> NeoForgeClientPayloads.suggestionResult(p));
     }
 
     private static ServerPlayer player(IPayloadContext ctx) {

@@ -1,6 +1,7 @@
 package net.ledok.datarewriter.mixin;
 
 import net.ledok.datarewriter.DisabledItems;
+import net.ledok.datarewriter.EditorPermissions;
 import net.minecraft.network.Connection;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
@@ -16,7 +17,8 @@ import java.util.List;
 
 /**
  * Sends the disabled-item list right before the recipes (join) or the tags (/reload): recipe viewers like
- * EMI reload once they have both, so they already know what to hide — no second reload.
+ * EMI reload once they have both, so they already know what to hide — no second reload. Also keeps the
+ * client's editor rights ({@link EditorPermissions}) in step with its operator level.
  */
 @Mixin(PlayerList.class)
 public abstract class PlayerListMixin {
@@ -29,6 +31,12 @@ public abstract class PlayerListMixin {
     private void datarewriter$syncDisabledItemsOnJoin(Connection connection, ServerPlayer player,
                                                       CommonListenerCookie cookie, CallbackInfo ci) {
         DisabledItems.sync(player);
+    }
+
+    /** Join, /op, /deop, LAN cheats: the client's command list is resent here — and its editor rights with it. */
+    @Inject(method = "sendPlayerPermissionLevel(Lnet/minecraft/server/level/ServerPlayer;)V", at = @At("TAIL"))
+    private void datarewriter$syncEditorAccess(ServerPlayer player, CallbackInfo ci) {
+        EditorPermissions.sync(player);
     }
 
     @Inject(method = "reloadResources", at = @At("HEAD"))

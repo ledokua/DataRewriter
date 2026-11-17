@@ -38,7 +38,7 @@ public class ComponentsEditScreen extends Screen {
 
     public ComponentsEditScreen(Screen parent, @Nullable String previewRef, @Nullable String initialJson,
                          Consumer<@Nullable JsonObject> onSet) {
-        super(Component.literal("Item components"));
+        super(EditorText.tr("components.title"));
         this.parent = parent;
         this.previewRef = previewRef;
         this.onSet = onSet;
@@ -52,7 +52,7 @@ public class ComponentsEditScreen extends Screen {
         int boxTop = height / 2 - 60;
         box = new MultiLineEditBox(font, boxLeft, boxTop, boxWidth, 96,
                 Component.literal("{\"minecraft:custom_name\": \"...\"}"),
-                Component.literal("Components"));
+                EditorText.tr("components.box"));
         box.setCharacterLimit(8000);
         box.setValue(text);
         box.setValueListener(value -> {
@@ -63,13 +63,13 @@ public class ComponentsEditScreen extends Screen {
         setInitialFocus(box);
 
         int y = boxTop + 102;
-        addRenderableWidget(Button.builder(Component.literal("OK"), b -> confirm())
+        addRenderableWidget(Button.builder(EditorText.tr("ok"), b -> confirm())
                 .bounds(width / 2 - 110, y, 68, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Remove"), b -> {
+        addRenderableWidget(Button.builder(EditorText.tr("components.remove"), b -> {
             onSet.accept(null);
             close();
         }).bounds(width / 2 - 36, y, 68, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
+        addRenderableWidget(Button.builder(EditorText.tr("cancel"), b -> onClose())
                 .bounds(width / 2 + 38, y, 68, 20).build());
         refreshPreview();
     }
@@ -94,12 +94,12 @@ public class ComponentsEditScreen extends Screen {
         try {
             parsed = JsonParser.parseString(value);
         } catch (Exception e) {
-            error = Component.literal("Not valid JSON: " + shorten(e.getMessage()))
+            error = EditorText.tr("components.bad_json", shorten(e.getMessage()))
                     .withStyle(ChatFormatting.RED);
             return null;
         }
         if (!(parsed instanceof JsonObject obj)) {
-            error = Component.literal("Must be a JSON object: {\"mod:component\": value, ...}")
+            error = EditorText.tr("components.not_object")
                     .withStyle(ChatFormatting.RED);
             return null;
         }
@@ -168,7 +168,7 @@ public class ComponentsEditScreen extends Screen {
         }
         if (error.getString().isEmpty()) {
             graphics.drawCenteredString(font,
-                    Component.literal("The item's \"components\" JSON object — validated on OK")
+                    EditorText.tr("components.hint")
                             .withStyle(ChatFormatting.GRAY),
                     width / 2, height / 2 + 66, 0xA0A0A0);
         } else {

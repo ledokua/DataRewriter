@@ -37,7 +37,7 @@ public class AmountInputScreen extends Screen {
     public AmountInputScreen(Screen parent, Component label, int initial, int min, int max,
                              IntConsumer onSet, Component extraLabel, Runnable extraAction,
                              Component extraLabel2, Runnable extraAction2) {
-        super(Component.literal("Set amount"));
+        super(EditorText.tr("amount.title"));
         this.parent = parent;
         this.label = label;
         this.min = min;
@@ -54,7 +54,7 @@ public class AmountInputScreen extends Screen {
     protected void init() {
         int centerX = width / 2;
         int y = height / 2 - 20;
-        EditBox box = new EditBox(font, centerX - 50, y, 100, 18, Component.literal("Amount"));
+        EditBox box = new EditBox(font, centerX - 50, y, 100, 18, EditorText.tr("amount.box"));
         box.setMaxLength(7);
         box.setFilter(s -> s.isEmpty() || s.matches("\\d{1,7}"));
         box.setValue(text);
@@ -62,9 +62,9 @@ public class AmountInputScreen extends Screen {
         addRenderableWidget(box);
         setInitialFocus(box);
 
-        addRenderableWidget(Button.builder(Component.literal("OK"), b -> confirm())
+        addRenderableWidget(Button.builder(EditorText.tr("ok"), b -> confirm())
                 .bounds(centerX - 50, y + 24, 48, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
+        addRenderableWidget(Button.builder(EditorText.tr("cancel"), b -> onClose())
                 .bounds(centerX + 2, y + 24, 48, 20).build());
         if (extraLabel != null && extraAction != null) {
             addRenderableWidget(Button.builder(extraLabel, b -> extraAction.run())

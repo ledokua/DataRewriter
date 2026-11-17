@@ -19,6 +19,8 @@ import net.ledok.datarewriter.network.RecipeSaveNetworking;
 import net.ledok.datarewriter.network.RegistryEditNetworking;
 import net.ledok.datarewriter.network.RegistryPayloads;
 import net.ledok.datarewriter.network.SaveRecipePayload;
+import net.ledok.datarewriter.network.SuggestionPayloads;
+import net.ledok.datarewriter.suggest.RecipeSuggestions;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.inventory.MenuType;
 
@@ -51,6 +53,11 @@ public final class DatarewriterFabric implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(RegistryPayloads.SaveEntry.TYPE, RegistryPayloads.SaveEntry.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(RegistryPayloads.EntryContent.TYPE, RegistryPayloads.EntryContent.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(DisabledItemsPayload.TYPE, DisabledItemsPayload.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(SuggestionPayloads.Access.TYPE, SuggestionPayloads.Access.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(SuggestionPayloads.Suggest.TYPE, SuggestionPayloads.Suggest.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(SuggestionPayloads.Review.TYPE, SuggestionPayloads.Review.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(SuggestionPayloads.Decision.TYPE, SuggestionPayloads.Decision.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(SuggestionPayloads.Result.TYPE, SuggestionPayloads.Result.STREAM_CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(SaveRecipePayload.TYPE,
                 (payload, context) -> RecipeSaveNetworking.handleSave(context.server(), context.player(), payload));
@@ -68,6 +75,10 @@ public final class DatarewriterFabric implements ModInitializer {
                 (payload, context) -> RegistryEditNetworking.handleEntryRequest(context.server(), context.player(), payload));
         ServerPlayNetworking.registerGlobalReceiver(RegistryPayloads.SaveEntry.TYPE,
                 (payload, context) -> RegistryEditNetworking.handleSave(context.server(), context.player(), payload));
+        ServerPlayNetworking.registerGlobalReceiver(SuggestionPayloads.Suggest.TYPE,
+                (payload, context) -> RecipeSuggestions.handleSuggest(context.server(), context.player(), payload));
+        ServerPlayNetworking.registerGlobalReceiver(SuggestionPayloads.Decision.TYPE,
+                (payload, context) -> RecipeSuggestions.handleDecision(context.server(), context.player(), payload));
 
         // Rules matching by output/input/type need parsed recipes and bound tags, which only exist once the
         // data reload has fully finished; the post-injection loot pass runs there too.

@@ -1,5 +1,6 @@
 package net.ledok.datarewriter.network;
 
+import net.ledok.datarewriter.EditorPermissions;
 import net.ledok.datarewriter.Datarewriter;
 import net.ledok.datarewriter.RecipeRewriter;
 import net.ledok.datarewriter.RewriteState;
@@ -22,7 +23,7 @@ import net.minecraft.server.level.ServerPlayer;
  * never send these payloads, and servers without the mod simply have no
  * receiver (the editor checks for that before sending). Each loader module
  * registers the payloads and routes them here; both handlers require
- * permission level 2.
+ * {@link EditorPermissions#SAVE}.
  */
 public final class RecipeSaveNetworking {
     private RecipeSaveNetworking() {
@@ -30,8 +31,8 @@ public final class RecipeSaveNetworking {
 
     /** {@code SaveRecipePayload}: one recipe from the editor. */
     public static void handleSave(MinecraftServer server, ServerPlayer player, SaveRecipePayload payload) {
-        if (!player.hasPermissions(2)) {
-            fail(player, "you need to be an operator (permission level 2) on this server");
+        if (!EditorPermissions.canSave(player)) {
+            fail(player, "you need the datarewriter.editor.save permission (or operator level 2 without LuckPerms) on this server");
             return;
         }
         GuiRecipeSaver.SaveResult result = GuiRecipeSaver.save(server, payload.recipeJson());
@@ -50,8 +51,8 @@ public final class RecipeSaveNetworking {
 
     /** {@code BulkRecipeEditPayload}: a remove-by-output/input or replace_ingredients rule from the tweaker. */
     public static void handleBulk(MinecraftServer server, ServerPlayer player, BulkRecipeEditPayload payload) {
-        if (!player.hasPermissions(2)) {
-            fail(player, "you need to be an operator (permission level 2) on this server");
+        if (!EditorPermissions.canSave(player)) {
+            fail(player, "you need the datarewriter.editor.save permission (or operator level 2 without LuckPerms) on this server");
             return;
         }
         String from = ConfigLoader.normalizeItemOrTag(payload.from());

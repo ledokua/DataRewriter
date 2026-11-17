@@ -51,7 +51,7 @@ public class ItemPickerScreen extends Screen {
 
     public ItemPickerScreen(Screen parent, boolean fluids, boolean allowTags, Consumer<String> onPick) {
         this(parent, fluids, allowTags,
-                Component.literal(fluids ? "Choose a fluid" : "Choose an item"), onPick);
+                EditorText.tr(fluids ? "items.title.fluid" : "items.title"), onPick);
     }
 
     public ItemPickerScreen(Screen parent, boolean fluids, boolean allowTags,
@@ -74,13 +74,11 @@ public class ItemPickerScreen extends Screen {
 
     @Override
     protected void init() {
-        searchBox = new EditBox(font, gridLeft(), 30, COLS * CELL, 18, Component.literal("Search"));
+        searchBox = new EditBox(font, gridLeft(), 30, COLS * CELL, 18, EditorText.tr("search"));
         searchBox.setMaxLength(128);
-        searchBox.setHint(Component.literal(allowTags ? "search — #… for tags" : "search")
+        searchBox.setHint(EditorText.tr(allowTags ? "items.search.hint.tags" : "items.search.hint")
                 .withStyle(ChatFormatting.DARK_GRAY));
-        searchBox.setTooltip(Tooltip.create(Component.literal(
-                "All space-separated words must match; @mod filters by namespace "
-                        + "— e.g. '@minecraft sword'")));
+        searchBox.setTooltip(Tooltip.create(EditorText.tr("search.tooltip", "@minecraft sword")));
         searchBox.setValue(query);
         searchBox.setResponder(text -> {
             query = text;
@@ -89,7 +87,7 @@ public class ItemPickerScreen extends Screen {
         addRenderableWidget(searchBox);
         setInitialFocus(searchBox);
 
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
+        addRenderableWidget(Button.builder(EditorText.tr("cancel"), b -> onClose())
                 .bounds(gridLeft() + (COLS * CELL - 80) / 2, gridTop() + ROWS * CELL + 10, 80, 20)
                 .build());
         refresh();
@@ -192,9 +190,9 @@ public class ItemPickerScreen extends Screen {
         }
 
         int totalRows = (entries.size() + COLS - 1) / COLS;
-        String footer = entries.isEmpty() ? "no matches"
-                : entries.size() + " matches" + (totalRows > ROWS ? " — scroll for more" : "");
-        graphics.drawCenteredString(font, Component.literal(footer).withStyle(ChatFormatting.GRAY),
+        Component footer = entries.isEmpty() ? EditorText.tr("no_matches")
+                : EditorText.tr(totalRows > ROWS ? "items.count.scroll" : "items.count", entries.size());
+        graphics.drawCenteredString(font, footer.copy().withStyle(ChatFormatting.GRAY),
                 width / 2, top + ROWS * CELL + 36, 0xA0A0A0);
 
         if (hovered != null) {

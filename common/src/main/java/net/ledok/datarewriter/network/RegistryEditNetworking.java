@@ -1,5 +1,6 @@
 package net.ledok.datarewriter.network;
 
+import net.ledok.datarewriter.EditorPermissions;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.ledok.datarewriter.Datarewriter;
@@ -18,7 +19,7 @@ import net.minecraft.server.level.ServerPlayer;
 /**
  * Server side of the ritual editor (datapack registry entries). Each loader module registers the
  * payloads and routes them here. Reading an entry is open to everyone — the data is synced to
- * clients anyway; saving requires permission level 2, like every other editor.
+ * clients anyway; saving requires {@link EditorPermissions#SAVE}, like every other editor.
  */
 public final class RegistryEditNetworking {
     private RegistryEditNetworking() {
@@ -38,8 +39,8 @@ public final class RegistryEditNetworking {
     /** {@code SaveEntry}: validate, persist as a {@code registries.add} rule, apply live. */
     public static void handleSave(MinecraftServer server, ServerPlayer player,
                                   RegistryPayloads.SaveEntry payload) {
-        if (!player.hasPermissions(2)) {
-            fail(player, "you need to be an operator (permission level 2) on this server");
+        if (!EditorPermissions.canSave(player)) {
+            fail(player, "you need the datarewriter.editor.save permission (or operator level 2 without LuckPerms) on this server");
             return;
         }
         ResourceLocation registry = ResourceLocation.tryParse(payload.registry());

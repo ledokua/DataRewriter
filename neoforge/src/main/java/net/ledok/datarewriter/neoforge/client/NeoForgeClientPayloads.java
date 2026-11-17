@@ -3,6 +3,7 @@ package net.ledok.datarewriter.neoforge.client;
 import net.ledok.datarewriter.client.DatarewriterClient;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RegistryPayloads;
+import net.ledok.datarewriter.network.SuggestionPayloads;
 import net.minecraft.client.Minecraft;
 
 /** Client-bound payload handlers; only ever loaded on the physical client (see {@code DatarewriterNeoForge}). */
@@ -16,4 +17,7 @@ public final class NeoForgeClientPayloads {
     public static void tableProvenance(LootPayloads.TableProvenance p) { DatarewriterClient.onTableProvenance(Minecraft.getInstance(), p); }
     public static void tableContent(LootPayloads.TableContent p) { DatarewriterClient.onTableContent(Minecraft.getInstance(), p); }
     public static void registryEntry(RegistryPayloads.EntryContent p) { DatarewriterClient.onRegistryEntry(Minecraft.getInstance(), p); }
+    public static void access(SuggestionPayloads.Access p) { DatarewriterClient.onAccess(p); }
+    public static void review(SuggestionPayloads.Review p) { DatarewriterClient.onReview(Minecraft.getInstance(), p); }
+    public static void suggestionResult(SuggestionPayloads.Result p) { DatarewriterClient.onSuggestionResult(Minecraft.getInstance(), p); }
 }

@@ -1,5 +1,6 @@
 package net.ledok.datarewriter.command;
 
+import net.ledok.datarewriter.EditorPermissions;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -69,7 +70,7 @@ public final class ListCommand {
     /** Registers the {@code /datarewriter} tree; each loader module calls this from its command event. */
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("datarewriter")
-                .requires(source -> source.hasPermission(2))
+                .requires(EditorPermissions::canSave)
                 .then(Commands.literal("list")
                         .then(kindNode(Kind.RECIPES))
                         .then(kindNode(Kind.LOOT_TABLES)))

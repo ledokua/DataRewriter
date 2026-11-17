@@ -27,11 +27,13 @@ public final class DatarewriterNeoForgeClient {
                 DatarewriterClient.openRecipeEditor();
                 return 1;
             }));
-            e.getDispatcher().register(Commands.literal("loottableeditor").executes(context -> {
+            e.getDispatcher().register(Commands.literal("loottableeditor")
+                    .requires(source -> DatarewriterClient.maySave()).executes(context -> {
                 DatarewriterClient.openLootTableEditor();
                 return 1;
             }));
-            e.getDispatcher().register(Commands.literal("recipetweaker").executes(context -> {
+            e.getDispatcher().register(Commands.literal("recipetweaker")
+                    .requires(source -> DatarewriterClient.maySave()).executes(context -> {
                 DatarewriterClient.openRecipeTweaker();
                 return 1;
             }));

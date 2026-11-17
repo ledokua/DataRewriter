@@ -126,6 +126,23 @@ public final class EditorLayout {
     }
 
     /**
+     * A {@link Finisher}'s refusal that the editor shows in the player's language: {@code key} is a lang key,
+     * {@code english} the same text as the fallback pattern (one %s per argument).
+     */
+    public static final class LayoutError extends IllegalArgumentException {
+        public final String key;
+        public final String english;
+        public final transient Object[] args;
+
+        public LayoutError(String key, String english, Object... args) {
+            super(String.format(english, args));
+            this.key = key;
+            this.english = english;
+            this.args = args;
+        }
+    }
+
+    /**
      * suggestions = values seen in existing recipes (or listed in a layout file), shown as a tooltip.
      * saved = false makes an editor-only field (bundled layouts): shown and readable by the
      * layout's decoration/finisher, but never written into the recipe JSON.

@@ -7,6 +7,8 @@ import net.ledok.datarewriter.client.gui.RecipeEditorScreen;
 import net.ledok.datarewriter.client.gui.RecipeTweaksScreen;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RegistryPayloads;
+import net.ledok.datarewriter.network.SuggestionPayloads;
+import net.ledok.datarewriter.platform.Network;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -24,6 +26,30 @@ public final class DatarewriterClient {
     public static void init() {
         ScreenshotHarness.init();
         BundledLootExtensions.register();
+        EdenStarter.register();
+    }
+
+    // What the server lets this player do in the editors (SuggestionPayloads.Access, on join and on LuckPerms
+    // changes). Unknown — a server without this DataRewriter version — behaves as before: Save is offered and
+    // the server decides.
+    private static boolean accessKnown;
+    private static boolean canSave;
+    private static boolean canSuggest;
+
+    public static void onAccess(SuggestionPayloads.Access payload) {
+        accessKnown = true;
+        canSave = payload.save();
+        canSuggest = payload.suggest();
+    }
+
+    /** The editors may save (and the staff commands show). */
+    public static boolean maySave() {
+        return !accessKnown || canSave;
+    }
+
+    /** The recipe editor may file suggestions: the server has a suggestion queue and the player may use it. */
+    public static boolean maySuggest() {
+        return accessKnown && canSuggest && Network.INSTANCE.canSendToServer(SuggestionPayloads.Suggest.TYPE);
     }
 
     // A command can't open a screen directly — the chat screen closes after the command runs and would
@@ -47,6 +73,7 @@ public final class DatarewriterClient {
     /** End of client tick. */
     public static void tick(Minecraft client) {
         if (client.level == null) {
+            accessKnown = false;
             openEditorNextTick = false;
             openLootEditorNextTick = false;
             openTweaksNextTick = false;
@@ -103,6 +130,17 @@ public final class DatarewriterClient {
     public static void onRegistryEntry(Minecraft client, RegistryPayloads.EntryContent payload) {
         if (client.screen instanceof RecipeEditorScreen editor) {
             editor.onRegistryEntry(payload.registry(), payload.entryId(), payload.json());
+        }
+    }
+
+    /** A staff member opened a recipe suggestion in Eden's Moderation window; Close returns there. */
+    public static void onReview(Minecraft client, SuggestionPayloads.Review payload) {
+        client.setScreen(RecipeEditorScreen.review(client.screen, payload));
+    }
+
+    public static void onSuggestionResult(Minecraft client, SuggestionPayloads.Result payload) {
+        if (client.screen instanceof RecipeEditorScreen editor) {
+            editor.onSuggestionResult(payload.ok(), payload.key(), payload.args());
         }
     }
 }

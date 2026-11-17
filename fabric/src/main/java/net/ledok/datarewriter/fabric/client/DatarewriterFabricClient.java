@@ -12,6 +12,7 @@ import net.ledok.datarewriter.DisabledItems;
 import net.ledok.datarewriter.network.DisabledItemsPayload;
 import net.ledok.datarewriter.network.LootPayloads;
 import net.ledok.datarewriter.network.RegistryPayloads;
+import net.ledok.datarewriter.network.SuggestionPayloads;
 
 public final class DatarewriterFabricClient implements ClientModInitializer {
     @Override
@@ -26,11 +27,13 @@ public final class DatarewriterFabricClient implements ClientModInitializer {
                 DatarewriterClient.openRecipeEditor();
                 return 1;
             }));
-            dispatcher.register(ClientCommandManager.literal("loottableeditor").executes(context -> {
+            dispatcher.register(ClientCommandManager.literal("loottableeditor")
+                    .requires(source -> DatarewriterClient.maySave()).executes(context -> {
                 DatarewriterClient.openLootTableEditor();
                 return 1;
             }));
-            dispatcher.register(ClientCommandManager.literal("recipetweaker").executes(context -> {
+            dispatcher.register(ClientCommandManager.literal("recipetweaker")
+                    .requires(source -> DatarewriterClient.maySave()).executes(context -> {
                 DatarewriterClient.openRecipeTweaker();
                 return 1;
             }));
@@ -51,5 +54,11 @@ public final class DatarewriterFabricClient implements ClientModInitializer {
                 (payload, context) -> DatarewriterClient.onRegistryEntry(context.client(), payload));
         ClientPlayNetworking.registerGlobalReceiver(DisabledItemsPayload.TYPE,
                 (payload, context) -> DisabledItems.receive(payload.items()));
+        ClientPlayNetworking.registerGlobalReceiver(SuggestionPayloads.Access.TYPE,
+                (payload, context) -> DatarewriterClient.onAccess(payload));
+        ClientPlayNetworking.registerGlobalReceiver(SuggestionPayloads.Review.TYPE,
+                (payload, context) -> DatarewriterClient.onReview(context.client(), payload));
+        ClientPlayNetworking.registerGlobalReceiver(SuggestionPayloads.Result.TYPE,
+                (payload, context) -> DatarewriterClient.onSuggestionResult(context.client(), payload));
     }
 }

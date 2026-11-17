@@ -30,6 +30,12 @@ import java.util.stream.Stream;
  * per data type, currently: recipes: { remove: [...], add: [...] }.
  */
 public final class ConfigLoader {
+    /**
+     * Optional note on a recipes.add entry, ignored by the game: who suggested an accepted recipe suggestion
+     * ("Alex (#12), accepted by LeDok 2026-11-15").
+     */
+    public static final String SUGGESTED_BY = "suggested_by";
+
     private static int errors;
     /** Errors and warnings of the load in progress. */
     private static final List<String> issues = new ArrayList<>();
@@ -912,6 +918,7 @@ public final class ConfigLoader {
                 id = ResourceLocation.fromNamespaceAndPath(Datarewriter.MOD_ID,
                         sanitizePath(fileStem) + "/" + index);
             }
+            obj.remove(SUGGESTED_BY);
             if (!obj.has("type")) {
                 error("[{}] add[{}] is missing 'type' (e.g. \"minecraft:crafting_shaped\")",
                         fileName, index);
@@ -925,7 +932,7 @@ public final class ConfigLoader {
                     break;
                 }
             }
-            additions.add(new RewriteConfig.AddedRecipe(id, obj));
+            additions.add(new RewriteConfig.AddedRecipe(id, obj, fileName));
         }
     }
 
@@ -1023,7 +1030,7 @@ public final class ConfigLoader {
         return isTag ? "#" + id : id.toString();
     }
 
-    static String sanitizePath(String s) {
+    public static String sanitizePath(String s) {
         return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9/._-]", "_");
     }
 

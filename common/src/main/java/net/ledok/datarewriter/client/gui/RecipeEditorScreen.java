@@ -6,15 +6,19 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.JsonOps;
+import net.ledok.datarewriter.client.DatarewriterClient;
+import net.ledok.datarewriter.config.GuiRecipeSaver;
 import net.ledok.datarewriter.platform.Network;
 import net.ledok.datarewriter.network.RegistryPayloads;
 import net.ledok.datarewriter.network.SaveRecipePayload;
+import net.ledok.datarewriter.network.SuggestionPayloads;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -54,22 +58,39 @@ import static net.ledok.datarewriter.client.gui.EditorLayout.SlotFormat;
  * and appends it to a normal DataRewriter config file (op only).
  */
 public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
+    /**
+     * EDIT saves (the {@code datarewriter.editor.save} right); SUGGEST files a proposal to the server's suggestion
+     * queue instead; VIEW only shows recipes; REVIEW is a staff member deciding on someone's suggestion.
+     */
+    private enum Mode { EDIT, SUGGEST, VIEW, REVIEW }
+
+    private final Mode mode;
+    /** Where Close returns to; null = back to the game. */
+    private final Screen parent;
     private final List<EditorLayout> layouts;
     private EditorLayout layout;
 
-    // Editor state is static and keyed by recipe type id, so closing and
-    // reopening the editor restores the last type, slots, amounts and field
-    // values (kept until the game quits).
-    private static final Map<String, String[]> REFS_BY_TYPE = new HashMap<>();
-    private static final Map<String, int[]> COUNTS_BY_TYPE = new HashMap<>();
-    private static final Map<String, int[]> CHANCES_BY_TYPE = new HashMap<>();
-    /** Raw components JSON per result slot (null = none), keyed like the other slot state. */
-    private static final Map<String, String[]> COMPONENTS_BY_TYPE = new HashMap<>();
-    private static final Map<String, Map<String, String>> FIELDS_BY_TYPE = new HashMap<>();
+    /** Slot and field values per recipe type id. */
+    private static final class State {
+        final Map<String, String[]> refs = new HashMap<>();
+        final Map<String, int[]> counts = new HashMap<>();
+        final Map<String, int[]> chances = new HashMap<>();
+        /** Raw components JSON per result slot (null = none). */
+        final Map<String, String[]> components = new HashMap<>();
+        final Map<String, Map<String, String>> fields = new HashMap<>();
+    }
+
+    // The editor's own state is static, so closing and reopening the editor
+    // restores the last type, slots, amounts and field values (kept until the
+    // game quits). A review works on states of its own.
+    private static final State SHARED = new State();
     private static String lastTypeId = "";
+    private State state = SHARED;
 
     private String idText = "";
     private Component status = Component.empty();
+    /** Set by a suggestion's review; null otherwise. */
+    private SuggestionReview review;
 
     private int panelLeft;
     private int panelTop;
@@ -130,20 +151,37 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private static class EditorError extends RuntimeException {
-        EditorError(String message) {
-            super(message);
+        final Component text;
+
+        EditorError(Component text) {
+            super(text.getString());
+            this.text = text;
         }
     }
 
+    /** {@code /recipeeditor}: saves with the save right, else suggests (or only shows recipes). */
     public RecipeEditorScreen() {
+        this(null, DatarewriterClient.maySave() ? Mode.EDIT : DatarewriterClient.maySuggest() ? Mode.SUGGEST : Mode.VIEW);
+    }
+
+    private RecipeEditorScreen(Screen parent, Mode mode) {
         // EMI (and REI/JEI) only attach their overlays to container screens,
         // so the editor is one — with a slot-less, client-only menu that never
         // talks to the server (all container packet paths are neutralized
         // below).
         super(new EditorMenu(0, Minecraft.getInstance().player.getInventory()),
                 Minecraft.getInstance().player.getInventory(),
-                Component.literal("Recipe Editor"));
-        this.layouts = EditorLayouts.loadAll();
+                EditorText.tr(switch (mode) {
+                    case EDIT -> "editor.title";
+                    case SUGGEST -> "editor.title.suggest";
+                    case VIEW -> "editor.title.view";
+                    case REVIEW -> "editor.title.review";
+                }));
+        this.mode = mode;
+        this.parent = parent;
+        // Registry entries (rituals) are for staff only: suggestions are about recipes.
+        List<EditorLayout> all = EditorLayouts.loadAll();
+        this.layouts = mode == Mode.EDIT ? all : all.stream().filter(l -> l.registryTarget == null).toList();
         EditorLayout remembered = null;
         for (EditorLayout candidate : layouts) {
             if (candidate.typeId.equals(lastTypeId)) {
@@ -152,7 +190,32 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
         }
         this.layout = remembered != null ? remembered : layouts.getFirst();
-        lastTypeId = this.layout.typeId;
+        if (mode != Mode.REVIEW) {
+            lastTypeId = this.layout.typeId;
+        }
+    }
+
+    /**
+     * The editor in suggest mode, returning to {@code parent} on Close — Eden's «Звернення» form, a recipe
+     * viewer. Players with the save right get the normal editor.
+     */
+    public static RecipeEditorScreen forSuggestion(Screen parent) {
+        return new RecipeEditorScreen(parent, DatarewriterClient.maySave() ? Mode.EDIT
+                : DatarewriterClient.maySuggest() ? Mode.SUGGEST : Mode.VIEW);
+    }
+
+    /** {@link #forSuggestion} with {@code recipe} loaded, ready to propose a change to it or its removal. */
+    public static RecipeEditorScreen suggestChange(Screen parent, RecipeHolder<?> recipe) {
+        RecipeEditorScreen screen = forSuggestion(parent);
+        screen.loadRecipe(recipe);
+        return screen;
+    }
+
+    /** A staff member reviewing a suggestion (opened from Eden's Moderation window). */
+    public static RecipeEditorScreen review(Screen parent, SuggestionPayloads.Review payload) {
+        RecipeEditorScreen screen = new RecipeEditorScreen(parent, Mode.REVIEW);
+        screen.startReview(payload);
+        return screen;
     }
 
     /** Switches to the layout for {@code typeId} (before the screen is shown); false when unknown. */
@@ -196,43 +259,43 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private String[] refs() {
-        String[] refs = REFS_BY_TYPE.get(layout.typeId);
+        String[] refs = state.refs.get(layout.typeId);
         if (refs == null || refs.length != layout.slots.size()) {
             refs = new String[layout.slots.size()];
-            REFS_BY_TYPE.put(layout.typeId, refs);
+            state.refs.put(layout.typeId, refs);
         }
         return refs;
     }
 
     private int[] counts() {
-        int[] counts = COUNTS_BY_TYPE.get(layout.typeId);
+        int[] counts = state.counts.get(layout.typeId);
         if (counts == null || counts.length != layout.slots.size()) {
             counts = new int[layout.slots.size()];
             for (int i = 0; i < counts.length; i++) {
                 counts[i] = layout.slots.get(i).format().fluid() ? 1000 : 1;
             }
-            COUNTS_BY_TYPE.put(layout.typeId, counts);
+            state.counts.put(layout.typeId, counts);
         }
         return counts;
     }
 
     /** Drop chances in percent (1-100), for chanceable slots. */
     private int[] chances() {
-        int[] chances = CHANCES_BY_TYPE.get(layout.typeId);
+        int[] chances = state.chances.get(layout.typeId);
         if (chances == null || chances.length != layout.slots.size()) {
             chances = new int[layout.slots.size()];
             java.util.Arrays.fill(chances, 100);
-            CHANCES_BY_TYPE.put(layout.typeId, chances);
+            state.chances.put(layout.typeId, chances);
         }
         return chances;
     }
 
     /** Components JSON text per slot, for slots where {@link #supportsComponents} is true. */
     private String[] components() {
-        String[] components = COMPONENTS_BY_TYPE.get(layout.typeId);
+        String[] components = state.components.get(layout.typeId);
         if (components == null || components.length != layout.slots.size()) {
             components = new String[layout.slots.size()];
-            COMPONENTS_BY_TYPE.put(layout.typeId, components);
+            state.components.put(layout.typeId, components);
         }
         return components;
     }
@@ -247,7 +310,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private Map<String, String> fieldValues() {
-        return FIELDS_BY_TYPE.computeIfAbsent(layout.typeId, k -> new HashMap<>());
+        return state.fields.computeIfAbsent(layout.typeId, k -> new HashMap<>());
     }
 
     private String fieldValue(FieldDef field) {
@@ -266,6 +329,9 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         } else {
             initSidePanel();
         }
+        if (review != null) {
+            initReviewPanel();
+        }
         // Advertise the UI rectangle as the container's "background" so
         // overlay mods position their panels beside it.
         leftPos = uiLeft;
@@ -282,7 +348,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
 
         // Vertical flow: type selector, panel, id box, field rows, buttons, status.
         List<List<FieldDef>> fieldRows = flowFields(contentW);
-        int totalH = 24 + layout.height + 6 + 22 + fieldRows.size() * 22 + 24 + 14;
+        int totalH = 24 + layout.height + 6 + 22 + fieldRows.size() * 22 + 24 + 14 + (review != null ? 22 : 0);
         int top = Math.max(6, (height - totalH) / 2);
 
         addRenderableWidget(typeButton(left, top, contentW));
@@ -312,11 +378,19 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
 
         int buttonW = (contentW - 8) / 3;
-        addRenderableWidget(Button.builder(Component.literal("Save recipe"), b -> save())
-                .bounds(left, y, buttonW, 20).build());
-        addRenderableWidget(clearButton(left + buttonW + 4, y, buttonW));
-        addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
-                .bounds(left + (buttonW + 4) * 2, y, buttonW, 20).build());
+        if (review != null) {
+            addRenderableWidget(acceptButton(left, y, buttonW));
+            addRenderableWidget(rejectButton(left + buttonW + 4, y, buttonW));
+            addRenderableWidget(closeButton(left + (buttonW + 4) * 2, y, buttonW));
+            y += 22;
+            int halfW = (contentW - 4) / 2;
+            addRenderableWidget(compareButton(left, y, halfW));
+            addRenderableWidget(detailsButton(left + halfW + 4, y, halfW));
+        } else {
+            addRenderableWidget(saveButton(left, y, buttonW));
+            addRenderableWidget(clearButton(left + buttonW + 4, y, buttonW));
+            addRenderableWidget(closeButton(left + (buttonW + 4) * 2, y, buttonW));
+        }
 
         // The status/hint line sits inside the UI box, not at the screen
         // bottom — EMI's search bar lives down there.
@@ -363,12 +437,21 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
 
         y += 2;
-        addRenderableWidget(Button.builder(Component.literal("Save recipe"), b -> save())
-                .bounds(colX, y, colW, 20).build());
-        y += 22;
-        addRenderableWidget(clearButton(colX, y, colW / 2 - 2));
-        addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
-                .bounds(colX + colW / 2 + 2, y, colW / 2 - 2, 20).build());
+        int halfW = colW / 2 - 2;
+        if (review != null) {
+            addRenderableWidget(acceptButton(colX, y, halfW));
+            addRenderableWidget(rejectButton(colX + colW / 2 + 2, y, halfW));
+            y += 22;
+            addRenderableWidget(compareButton(colX, y, halfW));
+            addRenderableWidget(detailsButton(colX + colW / 2 + 2, y, halfW));
+            y += 22;
+            addRenderableWidget(closeButton(colX, y, colW));
+        } else {
+            addRenderableWidget(saveButton(colX, y, colW));
+            y += 22;
+            addRenderableWidget(clearButton(colX, y, halfW));
+            addRenderableWidget(closeButton(colX + colW / 2 + 2, y, halfW));
+        }
         y += 20;
 
         statusY = Math.max(panelTop + layout.height, y) + 6;
@@ -380,7 +463,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private Button typeButton(int x, int y, int buttonWidth) {
-        return Button.builder(Component.literal(layout.displayName), b -> {
+        Button button = Button.builder(EditorText.layoutName(layout), b -> {
                     assert minecraft != null;
                     minecraft.setScreen(new TypePickerScreen(this, layouts, chosen -> {
                         layout = chosen;
@@ -389,42 +472,70 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                     }));
                 })
                 .bounds(x, y, buttonWidth, 20)
-                .tooltip(Tooltip.create(Component.literal("Click to choose a recipe type")))
+                .tooltip(Tooltip.create(EditorText.tr("editor.type.tooltip")))
                 .build();
+        // A suggestion is reviewed as sent; its type isn't up for change.
+        button.active = review == null;
+        return button;
     }
 
     private EditBox idBox(int x, int y, int boxW) {
-        EditBox box = new EditBox(font, x, y, boxW, 18, Component.literal("Recipe id"));
+        EditBox box = new EditBox(font, x, y, boxW, 18, EditorText.tr("editor.id"));
         box.setMaxLength(256);
-        box.setHint(Component.literal("recipe id (optional — use an existing id to replace it)")
-                .withStyle(ChatFormatting.DARK_GRAY));
+        box.setHint(EditorText.tr(switch (mode) {
+            case SUGGEST -> "editor.id.hint.suggest";
+            case REVIEW -> "editor.id.hint.review";
+            default -> "editor.id.hint";
+        }).withStyle(ChatFormatting.DARK_GRAY));
         box.setValue(idText);
         box.setResponder(text -> idText = text);
+        if (review != null && review.kind.equals("remove")) {
+            box.setEditable(false);
+        }
         return box;
     }
 
     private Component fieldLabel(FieldDef field) {
-        return Component.literal(field.label() + (field.required() ? "*" : ""))
+        return EditorText.fieldLabel(field.label()).append(field.required() ? "*" : "")
                 .withStyle(ChatFormatting.GRAY);
     }
 
     private EditBox fieldBox(FieldDef field, int x, int y, int boxW) {
-        EditBox box = new EditBox(font, x, y, boxW, 18, Component.literal(field.label()));
+        EditBox box = new EditBox(font, x, y, boxW, 18, EditorText.fieldLabel(field.label()));
         box.setMaxLength(256);
         box.setValue(fieldValue(field));
         box.setResponder(text -> fieldValues().put(field.path(), text));
         if (!field.suggestions().isEmpty()) {
-            box.setTooltip(Tooltip.create(Component.literal("Known values:\n"
-                    + String.join(", ", field.suggestions()))));
+            box.setTooltip(Tooltip.create(EditorText.tr("editor.field.known_values",
+                    String.join(", ", field.suggestions()))));
         }
         return box;
     }
 
     private Button clearButton(int x, int y, int buttonWidth) {
-        return Button.builder(Component.literal("Clear"), b -> clearSlots())
-                .tooltip(Tooltip.create(Component.literal("Empty every slot of this recipe type")))
+        return Button.builder(EditorText.tr("editor.clear"), b -> clearSlots())
+                .tooltip(Tooltip.create(EditorText.tr("editor.clear.tooltip")))
                 .bounds(x, y, buttonWidth, 20)
                 .build();
+    }
+
+    private Button closeButton(int x, int y, int buttonWidth) {
+        return Button.builder(EditorText.tr("editor.close"), b -> onClose()).bounds(x, y, buttonWidth, 20).build();
+    }
+
+    /** Save in EDIT, «Suggest…» in SUGGEST, a disabled Save in VIEW. */
+    private Button saveButton(int x, int y, int buttonWidth) {
+        if (mode == Mode.SUGGEST) {
+            return Button.builder(EditorText.tr("editor.suggest"), b -> suggest())
+                    .tooltip(Tooltip.create(EditorText.tr("editor.suggest.tooltip")))
+                    .bounds(x, y, buttonWidth, 20).build();
+        }
+        Button button = Button.builder(EditorText.tr("editor.save"), b -> save()).bounds(x, y, buttonWidth, 20).build();
+        if (mode == Mode.VIEW) {
+            button.active = false;
+            button.setTooltip(Tooltip.create(EditorText.tr("editor.view_only")));
+        }
+        return button;
     }
 
     /** The whole editor UI as {x, y, width, height} — EMI keeps its panels outside this. */
@@ -456,7 +567,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         // Skip AbstractContainerScreen's close-packet path — there is no
         // server-side container to close.
         assert minecraft != null;
-        minecraft.setScreen(null);
+        minecraft.setScreen(parent);
     }
 
     @Override
@@ -479,7 +590,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         List<FieldDef> row = new ArrayList<>();
         int x = 0;
         for (FieldDef field : layout.fields) {
-            int w = font.width(field.label() + (field.required() ? "*" : "")) + 5 + boxWidth(field) + 12;
+            int w = font.width(fieldLabel(field)) + 5 + boxWidth(field) + 12;
             if (!row.isEmpty() && x + w > contentW) {
                 rows.add(row);
                 row = new ArrayList<>();
@@ -522,7 +633,11 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 graphics.fill(x, y, x + 16, y + 16, 0xFF8B8B8B);
             }
             if (refs[i] == null) {
-                graphics.fill(x, y, x + 16, y + 16, slot.result() ? 0x3355FF55 : 0x33FFFFFF);
+                // Empty slots by role: results green, inputs blue; a required one gets an orange frame.
+                graphics.fill(x, y, x + 16, y + 16, slot.result() ? 0x4455FF55 : 0x445599FF);
+                if (requiredMissing(i) && review == null) {
+                    graphics.renderOutline(x - 1, y - 1, 18, 18, 0xFFFF9900);
+                }
             }
             boolean hover = mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16;
             if (hover) {
@@ -543,12 +658,15 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
 
         renderInventory(graphics, mouseX, mouseY);
+        renderReviewPanel(graphics);
 
         for (FieldLabel label : fieldLabels) {
             graphics.drawString(font, label.text(), label.x(), label.y(), 0xA0A0A0);
         }
-        if (!status.getString().isEmpty()) {
-            List<net.minecraft.util.FormattedCharSequence> lines = font.split(status, Math.max(200, width - 40));
+        Component shown = status.getString().isEmpty() && review == null ? requiredHint() : status;
+        if (!shown.getString().isEmpty()) {
+            List<net.minecraft.util.FormattedCharSequence> lines = font.split(shown,
+                    Math.min(width - 40, Math.max(200, uiRight - uiLeft)));
             for (int i = 0; i < Math.min(2, lines.size()); i++) {
                 graphics.drawCenteredString(font, lines.get(i), width / 2, statusY + i * 10, 0xFFFFFF);
             }
@@ -592,10 +710,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         List<ItemStack> items = minecraft.player.getInventory().items;
         if (layout.fullGui()) {
             // Both the GUI textures and the editor's own panel are light.
-            graphics.drawString(font, Component.literal("Inventory"),
+            graphics.drawString(font, EditorText.tr("editor.inventory"),
                     panelLeft + 8 - layout.u, panelTop + layout.inventoryY - layout.v - 12, 0x404040, false);
         } else {
-            graphics.drawString(font, Component.literal("Inventory").withStyle(ChatFormatting.GRAY),
+            graphics.drawString(font, EditorText.tr("editor.inventory").withStyle(ChatFormatting.GRAY),
                     invLeft, invTop - 11, 0xA0A0A0);
         }
         ItemStack hovered = ItemStack.EMPTY;
@@ -623,11 +741,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                     hovered.getHoverName(),
                     Component.literal(BuiltInRegistries.ITEM.getKey(hovered.getItem()).toString())
                             .withStyle(ChatFormatting.DARK_GRAY),
-                    Component.literal("Click to pick up, then click any slots — right-click drops")
-                            .withStyle(ChatFormatting.GRAY),
-                    Component.literal("Right/middle-click: pick up one of its #tags instead "
-                            + "(for slots that take tags)")
-                            .withStyle(ChatFormatting.GRAY)),
+                    EditorText.tr("editor.inventory.pick").withStyle(ChatFormatting.GRAY),
+                    EditorText.tr("editor.inventory.tags").withStyle(ChatFormatting.GRAY)),
                     mouseX, mouseY);
         }
     }
@@ -693,8 +808,13 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         return count > 1 ? tag + count : (tag.isEmpty() ? null : tag);
     }
 
+    /** A slot's label in the player's language (see {@link #slotLabelEnglish}). */
+    private static Component slotLabel(SlotDef slot) {
+        return EditorText.slotLabel(slotLabelEnglish(slot));
+    }
+
     /** Human label for a slot, derived from its JSON field ("base_fluid" -> "Base fluid"). */
-    private static String slotLabel(SlotDef slot) {
+    private static String slotLabelEnglish(SlotDef slot) {
         String path = slot.path();
         if (path.endsWith("[]")) {
             path = path.substring(0, path.length() - 2);
@@ -706,7 +826,8 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         if (path.isEmpty()) {
             return slot.result() ? "Result" : "Ingredient";
         }
-        String spaced = path.replace('_', ' ');
+        // camelCase paths too: "pedestalItems" -> "Pedestal items"
+        String spaced = path.replaceAll("([a-z0-9])([A-Z])", "$1 $2").replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
         return Character.toUpperCase(spaced.charAt(0)) + spaced.substring(1);
     }
 
@@ -714,49 +835,47 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         SlotDef slot = layout.slots.get(index);
         String ref = refs()[index];
         List<Component> lines = new ArrayList<>();
+        Component role = EditorText.tr(slot.result() ? "editor.slot.role.result" : "editor.slot.role.input")
+                .withStyle(slot.result() ? ChatFormatting.GREEN : ChatFormatting.AQUA);
         if (ref == null) {
-            lines.add(Component.literal(slotLabel(slot))
-                    .append(slot.required() ? " (required)" : "").withStyle(ChatFormatting.WHITE));
-            lines.add(Component.literal("Click to choose").withStyle(ChatFormatting.GRAY));
+            lines.add(slotLabel(slot).copy()
+                    .append(slot.required() ? EditorText.tr("editor.slot.required") : Component.empty())
+                    .withStyle(ChatFormatting.WHITE));
+            lines.add(role);
+            lines.add(EditorText.tr("editor.slot.choose").withStyle(ChatFormatting.GRAY));
             if (slot.acceptsTags() && !slot.format().fluid()) {
-                lines.add(Component.literal("#tags work here — type # in the item list, or "
-                        + "right/middle-click an inventory item for its tags")
-                        .withStyle(ChatFormatting.GRAY));
+                lines.add(EditorText.tr("editor.slot.tags").withStyle(ChatFormatting.GRAY));
             }
         } else {
-            lines.add(Component.literal(slotLabel(slot) + ": ").withStyle(ChatFormatting.GRAY)
+            lines.add(slotLabel(slot).copy().append(": ").withStyle(ChatFormatting.GRAY)
                     .append(iconFor(ref, slot.format().fluid()).getHoverName()));
             lines.add(Component.literal(ref).withStyle(ChatFormatting.DARK_GRAY));
+            lines.add(role);
             if (slot.format().fluid()) {
-                lines.add(Component.literal(counts()[index] + " mB").withStyle(ChatFormatting.AQUA));
+                lines.add(EditorText.tr("editor.slot.mb", counts()[index]).withStyle(ChatFormatting.AQUA));
             }
             if (slot.chanceable()) {
                 int chance = chances()[index];
-                lines.add(Component.literal("Chance: " + chance + "%"
-                                + (chance == 0 && !slot.result() ? " (required, never consumed)" : ""))
-                        .withStyle(ChatFormatting.AQUA));
+                lines.add(EditorText.tr(chance == 0 && !slot.result() ? "editor.slot.chance.never_consumed"
+                        : "editor.slot.chance", chance).withStyle(ChatFormatting.AQUA));
             }
             if (slot.acceptsTags() && !slot.format().fluid() && !ref.startsWith("#")) {
-                lines.add(Component.literal("Middle-click: convert to one of its #tags")
-                        .withStyle(ChatFormatting.GRAY));
+                lines.add(EditorText.tr("editor.slot.to_tag").withStyle(ChatFormatting.GRAY));
             }
             if (supportsComponents(slot)) {
-                lines.add(Component.literal(components()[index] != null
-                        ? "Has custom components — middle-click to edit"
-                        : "Middle-click: add data components (name, enchantments, ...)")
+                lines.add(EditorText.tr(components()[index] != null
+                        ? "editor.slot.components.edit" : "editor.slot.components.add")
                         .withStyle(components()[index] != null
                                 ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.GRAY));
             }
-            lines.add(Component.literal("Right-click to clear").withStyle(ChatFormatting.GRAY));
+            lines.add(EditorText.tr("editor.slot.clear").withStyle(ChatFormatting.GRAY));
         }
         if (slot.format().counted && layout.kind == Kind.SLOTS) {
-            lines.add(Component.literal(slot.format().fluid()
-                    ? "Scroll: ±100 mB (Shift ±10, Ctrl ±1000) — middle-click to type"
-                    : "Scroll or middle-click to set the count").withStyle(ChatFormatting.GRAY));
+            lines.add(EditorText.tr(slot.format().fluid() ? "editor.slot.scroll.fluid" : "editor.slot.scroll.count")
+                    .withStyle(ChatFormatting.GRAY));
         }
         if (slot.chanceable()) {
-            lines.add(Component.literal("Alt+Scroll: chance ±5% (Shift ±1%)")
-                    .withStyle(ChatFormatting.GRAY));
+            lines.add(EditorText.tr("editor.slot.scroll.chance").withStyle(ChatFormatting.GRAY));
         }
         graphics.renderComponentTooltip(font, lines, mouseX, mouseY);
     }
@@ -842,12 +961,12 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 // Middle-click: type an exact amount instead of scrolling (plus the
                 // slot's other actions — tag conversion, components).
                 boolean fluid = slot.format().fluid();
-                Component label = Component.literal(slotLabel(slot) + (fluid ? " (mB)" : " (count)"));
+                Component label = slotLabel(slot).copy().append(EditorText.tr(fluid ? "editor.amount.mb" : "editor.amount.count"));
                 int max = fluid ? 1_000_000 : 99;
                 minecraft.setScreen(new AmountInputScreen(this, label, counts()[index], 1, max,
                         amount -> counts()[slotIndex] = amount,
-                        toTag == null ? null : Component.literal("Convert to #tag…"), toTag,
-                        editComponents == null ? null : Component.literal("Edit components…"),
+                        toTag == null ? null : EditorText.tr("editor.amount.to_tag"), toTag,
+                        editComponents == null ? null : EditorText.tr("editor.amount.components"),
                         editComponents));
                 return true;
             }
@@ -1011,42 +1130,551 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         try {
             recipe = buildRecipe();
         } catch (EditorError e) {
-            status = Component.literal(e.getMessage()).withStyle(ChatFormatting.RED);
+            status = e.text.copy().withStyle(ChatFormatting.RED);
             return;
         }
         if (layout.registryTarget != null) {
             String entryId = idText.trim();
             if (ResourceLocation.tryParse(entryId) == null || entryId.isEmpty()) {
-                status = Component.literal("Give the entry an id first (like mypack:my_ritual).")
-                        .withStyle(ChatFormatting.RED);
+                status = EditorText.tr("editor.entry.id_needed").withStyle(ChatFormatting.RED);
                 return;
             }
             if (!Network.INSTANCE.canSendToServer(RegistryPayloads.SaveEntry.TYPE)) {
-                status = Component.literal("This server doesn't run DataRewriter — nothing saved.")
-                        .withStyle(ChatFormatting.RED);
+                status = EditorText.tr("editor.no_server").withStyle(ChatFormatting.RED);
                 return;
             }
             Network.INSTANCE.sendToServer(new RegistryPayloads.SaveEntry(
                     layout.registryTarget, entryId, recipe.toString()));
-            status = Component.literal("Sent — waiting for the server…").withStyle(ChatFormatting.YELLOW);
+            status = EditorText.tr("editor.sent").withStyle(ChatFormatting.YELLOW);
             return;
         }
         if (!Network.INSTANCE.canSendToServer(SaveRecipePayload.TYPE)) {
-            status = Component.literal("This server doesn't run DataRewriter — recipe not saved.")
-                    .withStyle(ChatFormatting.RED);
+            status = EditorText.tr("editor.no_server").withStyle(ChatFormatting.RED);
             return;
         }
         Network.INSTANCE.sendToServer(new SaveRecipePayload(recipe.toString()));
         // The editor stays open for the next recipe; the server's confirmation
         // (or rejection) arrives in chat.
-        status = Component.literal("Recipe sent — waiting for the server…")
-                .withStyle(ChatFormatting.YELLOW);
+        status = EditorText.tr("editor.sent").withStyle(ChatFormatting.YELLOW);
     }
 
     /** Server's answer to the last save (also in chat). */
     public void onSaveResult(boolean ok, String message) {
         status = Component.literal((ok ? "✔ " : "✘ ") + message)
                 .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.RED);
+    }
+
+    // ------------------------------------------------------------------ suggest mode
+
+    /** «Suggest…»: checks the recipe, then asks what kind of proposal it is and why. */
+    private void suggest() {
+        status = Component.empty();
+        if (!Network.INSTANCE.canSendToServer(SuggestionPayloads.Suggest.TYPE)) {
+            status = EditorText.tr("editor.no_server").withStyle(ChatFormatting.RED);
+            return;
+        }
+        String id = idText.trim();
+        ResourceLocation existing = id.isEmpty() ? null : ResourceLocation.tryParse(id);
+        assert minecraft != null && minecraft.level != null;
+        if (existing != null && minecraft.level.getRecipeManager().byKey(existing).isEmpty()) {
+            existing = null; // an id nothing has yet: a new recipe
+        }
+        Component buildError = null;
+        try {
+            buildRecipe();
+        } catch (EditorError e) {
+            buildError = e.text;
+        }
+        if (buildError != null && existing == null) {
+            status = buildError.copy().withStyle(ChatFormatting.RED);
+            return;
+        }
+        String recipeId = existing == null ? null : existing.toString();
+        minecraft.setScreen(new SuggestScreen(this, recipeId, buildError, proposalSummary(), proposalWarnings(),
+                this::sendSuggestion));
+    }
+
+    /**
+     * Under the editor while nothing else is said: which parts this recipe type needs (orange-framed slots, starred
+     * fields) and that blue slots are inputs, green ones results.
+     */
+    private Component requiredHint() {
+        List<String> fields = new ArrayList<>();
+        for (FieldDef field : layout.fields) {
+            if (field.required() && field.saved()) {
+                fields.add(EditorText.fieldLabel(field.label()).getString());
+            }
+        }
+        boolean requiredSlots = layout.slots.stream().anyMatch(SlotDef::required);
+        String key = requiredSlots ? (fields.isEmpty() ? "editor.required.hint" : "editor.required.hint.fields")
+                : (fields.isEmpty() ? "editor.required.hint.none" : "editor.required.hint.fields_only");
+        return EditorText.tr(key, String.join(", ", fields)).withStyle(ChatFormatting.GRAY);
+    }
+
+    /**
+     * A required slot left empty. A required slot of a list ("ingredients[]") stands for "at least one entry": any
+     * filled slot of the same list and role satisfies it, so inputs can go in any of the list's slots.
+     */
+    private boolean requiredMissing(int index) {
+        SlotDef slot = layout.slots.get(index);
+        String[] refs = refs();
+        if (!slot.required() || refs[index] != null) {
+            return false;
+        }
+        if (slot.path().endsWith("[]")) {
+            for (int i = 0; i < layout.slots.size(); i++) {
+                SlotDef other = layout.slots.get(i);
+                if (refs[i] != null && other.path().equals(slot.path()) && other.result() == slot.result()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** What the suggestion would send, for the form: the filled inputs, then the results. */
+    private List<Component> proposalSummary() {
+        List<String> inputs = new ArrayList<>();
+        List<String> results = new ArrayList<>();
+        for (int i = 0; i < layout.slots.size(); i++) {
+            String text = slotText(state, layout, i);
+            if (!text.equals("—")) {
+                (layout.slots.get(i).result() ? results : inputs).add(text);
+            }
+        }
+        return List.of(
+                EditorText.tr("suggest.summary.inputs", inputs.isEmpty() ? "—" : String.join(", ", inputs))
+                        .withStyle(ChatFormatting.AQUA),
+                EditorText.tr("suggest.summary.results", results.isEmpty() ? "—" : String.join(", ", results))
+                        .withStyle(ChatFormatting.GREEN));
+    }
+
+    /**
+     * Shapes that are probably a misunderstanding of the layout: an item that is both an input and a result, several
+     * results, or every input slot filled. The form asks for a second click before sending these.
+     */
+    private List<Component> proposalWarnings() {
+        String[] refs = refs();
+        Set<String> inputs = new HashSet<>();
+        int inputSlots = 0;
+        int inputsFilled = 0;
+        int resultsFilled = 0;
+        for (int i = 0; i < layout.slots.size(); i++) {
+            if (!layout.slots.get(i).result()) {
+                inputSlots++;
+                if (refs[i] != null) {
+                    inputsFilled++;
+                    inputs.add(refs[i]);
+                }
+            } else if (refs[i] != null) {
+                resultsFilled++;
+            }
+        }
+        List<Component> warnings = new ArrayList<>();
+        for (int i = 0; i < layout.slots.size(); i++) {
+            if (layout.slots.get(i).result() && refs[i] != null && inputs.contains(refs[i])) {
+                warnings.add(EditorText.tr("suggest.warn.same_item",
+                        iconFor(refs[i], layout.slots.get(i).format().fluid()).getHoverName()));
+                break;
+            }
+        }
+        if (resultsFilled > 1) {
+            warnings.add(EditorText.tr("suggest.warn.many_results", resultsFilled));
+        }
+        if (inputSlots > 3 && inputsFilled == inputSlots) {
+            warnings.add(EditorText.tr("suggest.warn.all_inputs"));
+        }
+        return warnings;
+    }
+
+    /** {@link SuggestScreen}'s Send: {@code kind} is "new", "edit" or "remove". */
+    private void sendSuggestion(String kind, String text) {
+        String json = "";
+        if (!kind.equals("remove")) {
+            try {
+                JsonObject recipe = buildRecipe();
+                recipe.remove("id");
+                json = recipe.toString();
+            } catch (EditorError e) {
+                status = e.text.copy().withStyle(ChatFormatting.RED);
+                return;
+            }
+        }
+        if (json.length() > SuggestionPayloads.MAX_RECIPE_CHARS) {
+            status = EditorText.tr("editor.suggest.too_big").withStyle(ChatFormatting.RED);
+            return;
+        }
+        Network.INSTANCE.sendToServer(new SuggestionPayloads.Suggest(kind, kind.equals("new") ? "" : idText.trim(),
+                json, firstResult(), text));
+        status = EditorText.tr("editor.sent").withStyle(ChatFormatting.YELLOW);
+    }
+
+    /** The first result slot's item, the server's hint for recipes whose result it can't read. */
+    private String firstResult() {
+        String[] refs = refs();
+        for (int i = 0; i < layout.slots.size(); i++) {
+            if (layout.slots.get(i).result() && refs[i] != null && !refs[i].startsWith("#")) {
+                return refs[i];
+            }
+        }
+        return "";
+    }
+
+    /** The server's answer to a suggestion or a review decision (also in chat). */
+    public void onSuggestionResult(boolean ok, String key, List<String> args) {
+        status = Component.literal(ok ? "✔ " : "✘ ")
+                .append(EditorText.tr(key, args.toArray()))
+                .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.RED);
+        if (ok && review != null && key.startsWith("review.")) {
+            review.decided = true;
+            rebuildWidgets();
+        }
+    }
+
+    // ------------------------------------------------------------------ review mode
+
+    /** A suggestion under review: what was proposed, what the recipe is now, and what changed. */
+    private static final class SuggestionReview {
+        long id;
+        String author;
+        String text;
+        /** "new", "edit" or "remove". */
+        String kind;
+        String recipeId;
+        String output;
+        /** The proposal (null for a removal), the recipe when it was suggested, and now. */
+        JsonObject proposed;
+        JsonObject base;
+        JsonObject current;
+        String definedIn;
+        String fixedId;
+        boolean canAccept;
+        /** Accepting can't work (a removal of a recipe a config file adds). */
+        boolean blocked;
+        boolean decided;
+        EditorLayout proposalLayout;
+        State proposalState;
+        EditorLayout currentLayout;
+        State currentState;
+        boolean showingCurrent;
+        final List<Component> lines = new ArrayList<>();
+    }
+
+    private int infoX;
+    private int infoY;
+    private int infoW;
+    private int infoH;
+
+    private void startReview(SuggestionPayloads.Review payload) {
+        SuggestionReview r = new SuggestionReview();
+        JsonObject data = parseObject(payload.payload());
+        JsonObject context = parseObject(payload.context());
+        r.id = payload.id();
+        r.author = payload.author();
+        r.text = payload.text();
+        r.kind = stringOr(data, "kind", "new");
+        r.recipeId = stringOr(data, "recipe_id", null);
+        r.output = stringOr(data, "output", "?");
+        r.proposed = data.get("proposed") instanceof JsonObject o ? o : null;
+        r.base = data.get("base") instanceof JsonObject o ? o : null;
+        r.current = context.get("current") instanceof JsonObject o ? o : null;
+        r.definedIn = stringOr(context, "defined_in", null);
+        r.fixedId = stringOr(context, "fixed_id", "");
+        r.canAccept = context.get("can_accept") instanceof JsonPrimitive p && p.isBoolean() && p.getAsBoolean();
+        review = r;
+
+        JsonObject before = r.current != null ? r.current : r.base;
+        JsonObject shown = r.kind.equals("remove") ? before : r.proposed;
+        r.proposalLayout = shown == null ? null : layoutFor(shown);
+        r.proposalState = r.proposalLayout == null ? new State() : loadInto(r.proposalLayout, shown);
+        if (r.proposalLayout != null) {
+            layout = r.proposalLayout;
+        }
+        state = r.proposalState;
+        if (!r.kind.equals("remove") && before != null) {
+            r.currentLayout = layoutFor(before);
+            if (r.currentLayout != null) {
+                r.currentState = loadInto(r.currentLayout, before);
+            }
+        }
+        idText = r.kind.equals("new") ? r.fixedId : r.recipeId == null ? "" : r.recipeId;
+        describe(r, before, shown);
+    }
+
+    /** The panel's text: who and what, the author's words, what changed, and what to watch out for. */
+    private void describe(SuggestionReview r, JsonObject before, JsonObject shown) {
+        List<Component> lines = r.lines;
+        lines.add(EditorText.tr("review.header", "#" + r.id, r.author).withStyle(ChatFormatting.GOLD));
+        lines.add(EditorText.tr("review.kind." + r.kind, r.recipeId == null ? r.output : r.recipeId)
+                .withStyle(ChatFormatting.YELLOW));
+        lines.add(Component.literal("“" + r.text + "”").withStyle(ChatFormatting.WHITE));
+        lines.add(Component.empty());
+        switch (r.kind) {
+            case "remove" -> lines.add(EditorText.tr("review.removal").withStyle(ChatFormatting.RED));
+            case "new" -> lines.add(EditorText.tr("review.new_recipe").withStyle(ChatFormatting.AQUA));
+            default -> {
+                lines.add(EditorText.tr("review.changes").withStyle(ChatFormatting.GRAY));
+                int before0 = lines.size();
+                diff(r, lines);
+                if (lines.size() == before0) {
+                    lines.add(EditorText.tr("review.no_visible_changes").withStyle(ChatFormatting.DARK_GRAY));
+                }
+            }
+        }
+        lines.add(Component.empty());
+        if (!r.kind.equals("new") && r.current == null) {
+            lines.add(EditorText.tr("review.warn.gone").withStyle(ChatFormatting.RED));
+        } else if (r.base != null && r.current != null && !r.base.equals(r.current)) {
+            lines.add(EditorText.tr("review.warn.changed_since").withStyle(ChatFormatting.YELLOW));
+        }
+        if (r.definedIn != null && !r.definedIn.equals(GuiRecipeSaver.FILE_NAME)) {
+            if (r.kind.equals("remove")) {
+                r.blocked = true;
+                lines.add(EditorText.tr("review.warn.remove_in_file", r.definedIn).withStyle(ChatFormatting.RED));
+            } else {
+                lines.add(EditorText.tr("review.warn.defined_in", r.definedIn).withStyle(ChatFormatting.YELLOW));
+            }
+        }
+        if (shown != null && r.proposalLayout == null) {
+            lines.add(EditorText.tr("review.warn.no_layout", stringOr(shown, "type", "?"))
+                    .withStyle(ChatFormatting.YELLOW));
+        }
+        if (!r.canAccept) {
+            lines.add(EditorText.tr("review.warn.no_save_right").withStyle(ChatFormatting.YELLOW));
+        }
+        lines.add(EditorText.tr("review.writes_to", GuiRecipeSaver.FILE_NAME).withStyle(ChatFormatting.DARK_GRAY));
+    }
+
+    /** Slot by slot and field by field, the recipe now against the proposal (same layout) — or the type change. */
+    private void diff(SuggestionReview r, List<Component> lines) {
+        if (r.currentLayout == null || r.proposalLayout == null) {
+            return;
+        }
+        if (r.currentLayout != r.proposalLayout) {
+            lines.add(EditorText.tr("review.type_changed", EditorText.layoutName(r.currentLayout),
+                    EditorText.layoutName(r.proposalLayout)).withStyle(ChatFormatting.AQUA));
+            return;
+        }
+        EditorLayout l = r.proposalLayout;
+        int grid = l.kind == Kind.SLOTS ? 0 : l.gridSize * l.gridSize;
+        for (int i = 0; i < l.slots.size(); i++) {
+            SlotDef slot = l.slots.get(i);
+            String was = slotText(r.currentState, l, i);
+            String now = slotText(r.proposalState, l, i);
+            if (!was.equals(now)) {
+                Component name = i < grid && !slot.result()
+                        ? EditorText.tr("review.grid", i / l.gridSize + 1, i % l.gridSize + 1)
+                        : slotLabel(slot);
+                lines.add(name.copy().append(": " + was + " → " + now).withStyle(ChatFormatting.AQUA));
+            }
+        }
+        for (FieldDef field : l.fields) {
+            String was = fieldText(r.currentState, l, field);
+            String now = fieldText(r.proposalState, l, field);
+            if (!was.equals(now)) {
+                lines.add(EditorText.fieldLabel(field.label()).append(": " + was + " → " + now)
+                        .withStyle(ChatFormatting.AQUA));
+            }
+        }
+    }
+
+    /** A slot's content for the diff: name, amount, chance; "—" when empty. */
+    private static String slotText(State st, EditorLayout l, int index) {
+        String[] refs = st.refs.get(l.typeId);
+        String ref = refs == null || index >= refs.length ? null : refs[index];
+        if (ref == null) {
+            return "—";
+        }
+        boolean fluid = l.slots.get(index).format().fluid();
+        StringBuilder text = new StringBuilder(ref.startsWith("#") ? ref : iconFor(ref, fluid).getHoverName().getString());
+        int[] counts = st.counts.get(l.typeId);
+        int count = counts == null || index >= counts.length ? 1 : counts[index];
+        if (fluid) {
+            text.append(' ').append(count).append(" mB");
+        } else if (count > 1) {
+            text.append(" ×").append(count);
+        }
+        int[] chances = st.chances.get(l.typeId);
+        if (chances != null && index < chances.length && chances[index] < 100) {
+            text.append(" (").append(chances[index]).append("%)");
+        }
+        String[] components = st.components.get(l.typeId);
+        if (components != null && index < components.length && components[index] != null) {
+            text.append(" +").append(components[index]);
+        }
+        return text.toString();
+    }
+
+    private static String fieldText(State st, EditorLayout l, FieldDef field) {
+        Map<String, String> values = st.fields.get(l.typeId);
+        String value = values == null ? null : values.get(field.path());
+        value = value == null || value.isBlank() ? field.defaultValue() : value.trim();
+        return value.isEmpty() ? "—" : value;
+    }
+
+    /** The first layout for the recipe JSON's type, or null. */
+    private EditorLayout layoutFor(JsonObject recipe) {
+        String type = stringOr(recipe, "type", "");
+        for (EditorLayout candidate : layouts) {
+            if (candidate.typeId.equals(type)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** Reads {@code recipe} into a fresh state for {@code target}, leaving the screen's own untouched. */
+    private State loadInto(EditorLayout target, JsonObject recipe) {
+        State savedState = state;
+        EditorLayout savedLayout = layout;
+        State scratch = new State();
+        state = scratch;
+        layout = target;
+        try {
+            JsonObject copy = recipe.deepCopy();
+            fillFromJson(target.prepareLoad != null ? target.prepareLoad.apply(copy) : copy);
+        } finally {
+            state = savedState;
+            layout = savedLayout;
+        }
+        return scratch;
+    }
+
+    /** The info panel goes right of the editor when there is room; Details shows it in full anyway. */
+    private void initReviewPanel() {
+        infoX = uiRight + 6;
+        infoW = Math.min(220, width - infoX - 6);
+        if (infoW < 120) {
+            infoW = 0;
+            return;
+        }
+        infoY = uiTop + 2;
+        infoH = Math.max(80, uiBottom - uiTop - 4);
+        uiRight = infoX + infoW + 3;
+    }
+
+    private void renderReviewPanel(GuiGraphics graphics) {
+        if (review == null || infoW == 0) {
+            return;
+        }
+        graphics.fill(infoX - 3, infoY - 3, infoX + infoW + 3, infoY + infoH + 3, 0xC0101010);
+        int y = infoY;
+        int bottom = infoY + infoH - 9;
+        for (Component line : review.lines) {
+            for (net.minecraft.util.FormattedCharSequence part : font.split(line, infoW)) {
+                if (y > bottom - 10) {
+                    graphics.drawString(font, EditorText.tr("review.more").withStyle(ChatFormatting.DARK_GRAY),
+                            infoX, y, 0xFFFFFF);
+                    return;
+                }
+                graphics.drawString(font, part, infoX, y, 0xFFFFFF);
+                y += 10;
+            }
+        }
+    }
+
+    private Button acceptButton(int x, int y, int buttonWidth) {
+        Button button = Button.builder(EditorText.tr("review.accept"), b -> {
+                    assert minecraft != null;
+                    minecraft.setScreen(new DecisionScreen(this, true, review.id, reason -> decide(true, reason)));
+                })
+                .bounds(x, y, buttonWidth, 20)
+                .tooltip(Tooltip.create(EditorText.tr("review.accept.tooltip", GuiRecipeSaver.FILE_NAME)))
+                .build();
+        button.active = !review.decided && review.canAccept && !review.blocked && !review.showingCurrent;
+        return button;
+    }
+
+    private Button rejectButton(int x, int y, int buttonWidth) {
+        Button button = Button.builder(EditorText.tr("review.reject"), b -> {
+                    assert minecraft != null;
+                    minecraft.setScreen(new DecisionScreen(this, false, review.id, reason -> decide(false, reason)));
+                })
+                .bounds(x, y, buttonWidth, 20)
+                .build();
+        button.active = !review.decided && !review.showingCurrent;
+        return button;
+    }
+
+    /** Swaps the panel between the proposal and the recipe as it is now. */
+    private Button compareButton(int x, int y, int buttonWidth) {
+        Button button = Button.builder(EditorText.tr(review.showingCurrent ? "review.show_proposal"
+                        : "review.show_current"), b -> {
+                    review.showingCurrent = !review.showingCurrent;
+                    layout = review.showingCurrent ? review.currentLayout : review.proposalLayout;
+                    state = review.showingCurrent ? review.currentState : review.proposalState;
+                    status = review.showingCurrent
+                            ? EditorText.tr("review.showing_current").withStyle(ChatFormatting.YELLOW)
+                            : Component.empty();
+                    rebuildWidgets();
+                })
+                .bounds(x, y, buttonWidth, 20)
+                .build();
+        button.active = review.currentState != null && review.proposalLayout != null;
+        return button;
+    }
+
+    private Button detailsButton(int x, int y, int buttonWidth) {
+        return Button.builder(EditorText.tr("review.details"), b -> {
+                    assert minecraft != null;
+                    minecraft.setScreen(new TextLinesScreen(this, EditorText.tr("review.details.title", "#" + review.id),
+                            review.lines));
+                })
+                .bounds(x, y, buttonWidth, 20)
+                .build();
+    }
+
+    /** {@link DecisionScreen}'s confirm: sends the verdict with the (possibly edited) recipe. */
+    private void decide(boolean accept, String reason) {
+        SuggestionReview r = review;
+        String recipeId = "";
+        String json = "";
+        if (accept) {
+            if (r.kind.equals("remove")) {
+                recipeId = r.recipeId == null ? "" : r.recipeId;
+            } else {
+                JsonObject recipe;
+                if (r.proposalLayout == null) {
+                    recipe = r.proposed.deepCopy(); // no layout to edit it with: as proposed
+                } else {
+                    try {
+                        recipe = buildRecipe();
+                    } catch (EditorError e) {
+                        status = e.text.copy().withStyle(ChatFormatting.RED);
+                        return;
+                    }
+                }
+                String id = idText.trim();
+                if (id.isEmpty() || ResourceLocation.tryParse(id) == null) {
+                    status = EditorText.tr("review.id_needed").withStyle(ChatFormatting.RED);
+                    return;
+                }
+                recipe.addProperty("id", id);
+                json = recipe.toString();
+                if (json.length() > SuggestionPayloads.MAX_RECIPE_CHARS) {
+                    status = EditorText.tr("editor.suggest.too_big").withStyle(ChatFormatting.RED);
+                    return;
+                }
+            }
+        }
+        if (!Network.INSTANCE.canSendToServer(SuggestionPayloads.Decision.TYPE)) {
+            status = EditorText.tr("editor.no_server").withStyle(ChatFormatting.RED);
+            return;
+        }
+        Network.INSTANCE.sendToServer(new SuggestionPayloads.Decision(r.id, accept, recipeId, json, reason));
+        status = EditorText.tr("editor.sent").withStyle(ChatFormatting.YELLOW);
+    }
+
+    private static JsonObject parseObject(String json) {
+        try {
+            return JsonParser.parseString(json) instanceof JsonObject obj ? obj : new JsonObject();
+        } catch (Exception e) {
+            return new JsonObject();
+        }
+    }
+
+    private static String stringOr(JsonObject obj, String key, String fallback) {
+        return obj.get(key) instanceof JsonPrimitive p && p.isString() ? p.getAsString() : fallback;
     }
 
     /** Per-slot icons with the slot's components applied (key: ref + components text). */
@@ -1080,10 +1708,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
     }
 
     private void clearSlots() {
-        REFS_BY_TYPE.remove(layout.typeId);
-        COUNTS_BY_TYPE.remove(layout.typeId);
-        CHANCES_BY_TYPE.remove(layout.typeId);
-        COMPONENTS_BY_TYPE.remove(layout.typeId);
+        state.refs.remove(layout.typeId);
+        state.counts.remove(layout.typeId);
+        state.chances.remove(layout.typeId);
+        state.components.remove(layout.typeId);
         cursorItem = null;
         cursorTag = null;
         status = Component.empty();
@@ -1096,7 +1724,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             String id = idText.trim();
             if (!id.isEmpty()) {
                 if (ResourceLocation.tryParse(id) == null) {
-                    throw new EditorError("'" + id + "' is not a valid recipe id");
+                    throw new EditorError(EditorText.tr("editor.error.bad_id", id));
                 }
                 recipe.addProperty("id", id);
             }
@@ -1117,14 +1745,14 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
             String ref = refs[i];
             if (ref == null) {
-                if (slot.required()) {
-                    throw new EditorError(slot.result() ? "choose a result item"
-                            : "a required ingredient slot is empty");
+                if (requiredMissing(i)) {
+                    throw new EditorError(EditorText.tr(slot.result() ? "editor.error.no_result"
+                            : "editor.error.required_slot", slotLabel(slot)));
                 }
                 continue;
             }
             if (ref.startsWith("#") && !slot.acceptsTags()) {
-                throw new EditorError("that slot can't take a tag (" + ref + ")");
+                throw new EditorError(EditorText.tr("editor.error.no_tags", ref));
             }
             setAtPath(recipe, slot.path(), slotValue(slot, ref, counts[i], chances()[i] / 100f,
                     supportsComponents(slot) ? components()[i] : null));
@@ -1137,7 +1765,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             String text = fieldValue(field).trim();
             if (text.isEmpty()) {
                 if (field.required()) {
-                    throw new EditorError("'" + field.label() + "' is required");
+                    throw new EditorError(EditorText.tr("editor.error.field_required", EditorText.fieldLabel(field.label())));
                 }
                 continue;
             }
@@ -1146,20 +1774,20 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                     try {
                         yield new JsonPrimitive(Long.parseLong(text));
                     } catch (NumberFormatException e) {
-                        throw new EditorError("'" + field.label() + "' must be a whole number");
+                        throw new EditorError(EditorText.tr("editor.error.field_int", EditorText.fieldLabel(field.label())));
                     }
                 }
                 case FLOAT -> {
                     try {
                         yield new JsonPrimitive(Double.parseDouble(text));
                     } catch (NumberFormatException e) {
-                        throw new EditorError("'" + field.label() + "' must be a number");
+                        throw new EditorError(EditorText.tr("editor.error.field_number", EditorText.fieldLabel(field.label())));
                     }
                 }
                 case STRING -> new JsonPrimitive(text);
                 case BOOL -> {
                     if (!text.equalsIgnoreCase("true") && !text.equalsIgnoreCase("false")) {
-                        throw new EditorError("'" + field.label() + "' must be true or false");
+                        throw new EditorError(EditorText.tr("editor.error.field_bool", EditorText.fieldLabel(field.label())));
                     }
                     yield new JsonPrimitive(Boolean.parseBoolean(text));
                 }
@@ -1169,8 +1797,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         if (layout.finisher != null) {
             try {
                 layout.finisher.finish(recipe, slotView);
+            } catch (EditorLayout.LayoutError e) {
+                throw new EditorError(Component.translatableWithFallback(e.key, e.english, e.args));
             } catch (IllegalArgumentException e) {
-                throw new EditorError(e.getMessage());
+                throw new EditorError(Component.literal(e.getMessage()));
             }
         }
         return layout.finishSave != null ? layout.finishSave.apply(recipe) : recipe;
@@ -1193,7 +1823,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
         }
         if (maxRow < 0) {
-            throw new EditorError("place at least one ingredient in the grid");
+            throw new EditorError(EditorText.tr("editor.error.empty_grid"));
         }
         LinkedHashMap<String, Character> letters = new LinkedHashMap<>();
         JsonArray pattern = new JsonArray();
@@ -1226,7 +1856,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             }
         }
         if (ingredients.isEmpty()) {
-            throw new EditorError("place at least one ingredient in the grid");
+            throw new EditorError(EditorText.tr("editor.error.empty_grid"));
         }
         recipe.add("ingredients", ingredients);
     }
@@ -1307,14 +1937,14 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
      * set to the recipe's id, so saving unchanged replaces it.
      */
     public boolean loadRecipe(RecipeHolder<?> holder) {
-        assert minecraft != null;
-        if (minecraft.level == null) {
+        Minecraft mc = Minecraft.getInstance(); // also before init, from suggestChange
+        if (mc.level == null) {
             return false;
         }
         JsonElement encoded;
         try {
             encoded = Recipe.CODEC.encodeStart(RegistryOps.create(JsonOps.INSTANCE,
-                    minecraft.level.registryAccess()), holder.value()).result().orElse(null);
+                    mc.level.registryAccess()), holder.value()).result().orElse(null);
         } catch (Exception e) {
             encoded = null;
         }
@@ -1344,17 +1974,23 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         layout = target;
         lastTypeId = typeId;
         clearSlots();
-        FIELDS_BY_TYPE.remove(typeId);
+        state.fields.remove(typeId);
         if (layout.prepareLoad != null) {
             json = layout.prepareLoad.apply(json);
         }
         fillFromJson(json);
 
         idText = holder.id().toString();
-        status = Component.literal("Loaded " + holder.id() + " — save to replace it.")
-                .withStyle(ChatFormatting.GREEN);
-        rebuildWidgets();
+        status = loadedStatus(holder.id().toString());
+        if (minecraft != null) {
+            rebuildWidgets();
+        }
         return true;
+    }
+
+    private Component loadedStatus(String id) {
+        return EditorText.tr(mode == Mode.SUGGEST ? "editor.loaded.suggest" : "editor.loaded", id)
+                .withStyle(ChatFormatting.GREEN);
     }
 
     /** Fills slots and fields from a recipe/entry in its serialized JSON form (layout already selected). */
@@ -1435,20 +2071,18 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
 
     /** The Load button of registry layouts: asks the server for the entry named in the id box. */
     private Button loadEntryButton(int x, int y, int width) {
-        return Button.builder(Component.literal("Load"), b -> {
+        return Button.builder(EditorText.tr("editor.entry.load"), b -> {
             String entryId = idText.trim();
             if (ResourceLocation.tryParse(entryId) == null || entryId.isEmpty()) {
-                status = Component.literal("Type the entry's id first (like forbidden_arcanus:boss_catcher).")
-                        .withStyle(ChatFormatting.RED);
+                status = EditorText.tr("editor.entry.load_id_needed").withStyle(ChatFormatting.RED);
                 return;
             }
             if (!Network.INSTANCE.canSendToServer(RegistryPayloads.EntryRequest.TYPE)) {
-                status = Component.literal("This server doesn't run DataRewriter.")
-                        .withStyle(ChatFormatting.RED);
+                status = EditorText.tr("editor.no_server").withStyle(ChatFormatting.RED);
                 return;
             }
             Network.INSTANCE.sendToServer(new RegistryPayloads.EntryRequest(layout.registryTarget, entryId));
-            status = Component.literal("Loading " + entryId + "…").withStyle(ChatFormatting.YELLOW);
+            status = EditorText.tr("editor.entry.loading", entryId).withStyle(ChatFormatting.YELLOW);
         }).bounds(x, y, width, 20).build();
     }
 
@@ -1458,8 +2092,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             return;
         }
         if (json.isEmpty()) {
-            status = Component.literal("No entry '" + entryId + "' in " + registry + " on this server.")
-                    .withStyle(ChatFormatting.RED);
+            status = EditorText.tr("editor.entry.missing", entryId, registry).withStyle(ChatFormatting.RED);
             return;
         }
         JsonObject parsed;
@@ -1469,7 +2102,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
             parsed = null;
         }
         if (parsed == null) {
-            status = Component.literal("The server sent an unreadable entry.").withStyle(ChatFormatting.RED);
+            status = EditorText.tr("editor.entry.unreadable").withStyle(ChatFormatting.RED);
             return;
         }
         clearSlots();
@@ -1478,14 +2111,14 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
         fillFromJson(parsed);
         idText = entryId;
-        status = Component.literal("Loaded " + entryId + " — save to replace it.")
-                .withStyle(ChatFormatting.GREEN);
+        status = loadedStatus(entryId);
         rebuildWidgets();
     }
 
     /** Fills the crafting grid from an already-parsed shaped recipe (no JSON round-trip). */
     private boolean loadShapedParsed(RecipeHolder<?> holder, ShapedRecipe shaped, String typeId) {
-        assert minecraft != null && minecraft.level != null;
+        Minecraft mc = Minecraft.getInstance();
+        assert mc.level != null;
         // Vanilla shaped recipes and shaped-derived modded ones (e.g. Create's
         // mechanical crafting) share the serializer id with their layout's type.
         EditorLayout target = null;
@@ -1518,7 +2151,7 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
                 }
             }
         }
-        ItemStack result = shaped.getResultItem(minecraft.level.registryAccess());
+        ItemStack result = shaped.getResultItem(mc.level.registryAccess());
         for (int i = 0; i < layout.slots.size(); i++) {
             if (layout.slots.get(i).result() && !result.isEmpty()) {
                 refs[i] = BuiltInRegistries.ITEM.getKey(result.getItem()).toString();
@@ -1527,9 +2160,10 @@ public class RecipeEditorScreen extends AbstractContainerScreen<EditorMenu> {
         }
 
         idText = holder.id().toString();
-        status = Component.literal("Loaded " + holder.id() + " — save to replace it.")
-                .withStyle(ChatFormatting.GREEN);
-        rebuildWidgets();
+        status = loadedStatus(holder.id().toString());
+        if (minecraft != null) {
+            rebuildWidgets();
+        }
         return true;
     }
 

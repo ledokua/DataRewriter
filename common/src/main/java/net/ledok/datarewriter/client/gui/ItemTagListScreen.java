@@ -33,7 +33,7 @@ public class ItemTagListScreen extends Screen {
 
     public ItemTagListScreen(Screen parent, Item item, Consumer<String> onPick) {
         super(Component.empty().append(new ItemStack(item).getHoverName())
-                .append(Component.literal(" is in these tags:")));
+                .append(EditorText.tr("tags.title_suffix")));
         this.parent = parent;
         this.onPick = onPick;
         this.tags = BuiltInRegistries.ITEM.wrapAsHolder(item).tags()
@@ -57,9 +57,9 @@ public class ItemTagListScreen extends Screen {
 
     @Override
     protected void init() {
-        EditBox searchBox = new EditBox(font, listLeft(), 30, LIST_WIDTH, 18, Component.literal("Search"));
+        EditBox searchBox = new EditBox(font, listLeft(), 30, LIST_WIDTH, 18, EditorText.tr("search"));
         searchBox.setMaxLength(128);
-        searchBox.setHint(Component.literal("search").withStyle(ChatFormatting.DARK_GRAY));
+        searchBox.setHint(EditorText.tr("items.search.hint").withStyle(ChatFormatting.DARK_GRAY));
         searchBox.setValue(query);
         searchBox.setResponder(text -> {
             query = text;
@@ -72,7 +72,7 @@ public class ItemTagListScreen extends Screen {
         addRenderableWidget(searchBox);
         setInitialFocus(searchBox);
 
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
+        addRenderableWidget(Button.builder(EditorText.tr("cancel"), b -> onClose())
                 .bounds((width - 80) / 2, height - 28, 80, 20)
                 .build());
     }
@@ -110,11 +110,10 @@ public class ItemTagListScreen extends Screen {
             graphics.drawString(font, filtered.get(index), left, y + 2, 0xFFFFFF);
         }
 
-        String footer = tags.isEmpty() ? "this item is in no tags"
-                : filtered.isEmpty() ? "no matches"
-                : filtered.size() + " tags" + (filtered.size() > rows ? " — scroll for more" : "")
-                        + " — click one to use it";
-        graphics.drawCenteredString(font, Component.literal(footer).withStyle(ChatFormatting.GRAY),
+        Component footer = tags.isEmpty() ? EditorText.tr("tags.none")
+                : filtered.isEmpty() ? EditorText.tr("no_matches")
+                : EditorText.tr(filtered.size() > rows ? "tags.count.scroll" : "tags.count", filtered.size());
+        graphics.drawCenteredString(font, footer.copy().withStyle(ChatFormatting.GRAY),
                 width / 2, top + rows * ROW_HEIGHT + 10, 0xA0A0A0);
     }
 

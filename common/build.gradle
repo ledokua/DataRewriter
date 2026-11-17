@@ -21,6 +21,10 @@ dependencies {
     // plugin class is loaded solely by EMI itself (Fabric "emi" entrypoint / NeoForge @EmiEntrypoint scan),
     // so nothing breaks when EMI is not installed. The api jar is the same on both loaders.
     modCompileOnly("dev.emi:emi-fabric:${rootProject.emi_version}:api") { transitive = false }
+
+    // Optional LuckPerms permission nodes (EditorPermissions). Only touched when the luckperms mod is
+    // loaded; the API is the same on both loaders.
+    compileOnly "net.luckperms:api:5.4"
 }
 
 loom {

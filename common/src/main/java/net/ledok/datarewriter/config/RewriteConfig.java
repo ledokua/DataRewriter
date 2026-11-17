@@ -97,8 +97,14 @@ public record RewriteConfig(List<RemovalRule> removals, List<AddedRecipe> additi
         }
     }
 
-    /** A new (or replacement) recipe in vanilla recipe JSON format. */
-    public record AddedRecipe(ResourceLocation id, JsonElement json) {
+    /**
+     * A new (or replacement) recipe in vanilla recipe JSON format. {@code source}: the config file that adds it
+     * (null for addons' rules).
+     */
+    public record AddedRecipe(ResourceLocation id, JsonElement json, @Nullable String source) {
+        public AddedRecipe(ResourceLocation id, JsonElement json) {
+            this(id, json, null);
+        }
     }
 
     /**

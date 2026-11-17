@@ -8,8 +8,9 @@ whole items out of the game and switch off worldgen features.
 
 > Minecraft 1.21.1 · Java 21 · Fabric (needs [Fabric API](https://modrinth.com/mod/fabric-api)) or
 > NeoForge, one jar per loader. **Server-side.** Vanilla clients can join and get every rewritten recipe
-> through normal recipe sync; installing the mod on your own client is what adds the editors. All in-game
-> editing requires operator level 2.
+> through normal recipe sync; installing the mod on your own client is what adds the editors. Saving in the
+> editors needs the `datarewriter.editor.save` permission (operator level 2 without LuckPerms); with a
+> suggestion queue on the server (Eden_LD), everyone else can propose recipe changes for staff to review.
 
 ## Find a feature
 
@@ -25,6 +26,8 @@ whole items out of the game and switch off worldgen features.
 | Edit rituals, enchantments or other datapack registries | [Datapack registries](#datapack-registries) | `registries.remove` / `modify` / `add` |
 | Edit recipes visually | [Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) | `/recipeeditor`, `/recipetweaker` |
 | Edit loot tables visually (components included) | [Loot table editor](#loot-table-editor) | `/loottableeditor` |
+| Let players propose recipe changes for staff to review | [Recipe suggestions](#recipe-suggestions) | `/recipeeditor` → Suggest… |
+| Choose who may save in the editors | [Permissions](#permissions) | `datarewriter.editor.save`, `datarewriter.suggest` |
 | Keep a tool-generated config file read-only in the editors | [Config files](#config-files) | top-level `generated: "…"` |
 | Make a modded recipe type editable | [Editor layouts](#editor-layouts--manual-override) | `config/datarewriter/editor-layouts/` |
 | See what's loaded or what went wrong | [Commands](#commands) · [Troubleshooting](#troubleshooting) | `/datarewriter status`, `/datarewriter errors` |
@@ -36,7 +39,8 @@ whole items out of the game and switch off worldgen features.
 [Replacing ingredients](#replacing-ingredients) · [Adding & replacing recipes](#adding--replacing-recipes) ·
 [Loot tables](#loot-tables) · [Item rules across tables](#item-rules-across-tables) ·
 [Disabling items](#disabling-items) · [Worldgen features](#worldgen-features) ·
-[Recipe editor](#recipe-editor) · [Recipe tweaks](#recipe-tweaks) · [Loot table editor](#loot-table-editor) ·
+[Recipe editor](#recipe-editor) · [Recipe suggestions](#recipe-suggestions) · [Permissions](#permissions) ·
+[Recipe tweaks](#recipe-tweaks) · [Loot table editor](#loot-table-editor) ·
 [Supported mods](#natively-supported-mods) · [Editor layouts](#editor-layouts--manual-override) ·
 [Datapack registries](#datapack-registries) · [Commands](#commands) · [File locations](#file-locations) ·
 [Troubleshooting](#troubleshooting) ·
@@ -435,8 +439,12 @@ validates it, appends it to a normal config file and applies it to the running g
 | `/loottableeditor` | [Loot table editor](#loot-table-editor) | Browse and edit any loot table on the server |
 | `/recipeeditor` → Hephaestus forge ritual | [Ritual editor](#hephaestus-forge-rituals-forbidden-arcanus) | Edit Forbidden Arcanus forge rituals (with the mod installed) |
 
-Saving requires **operator level 2** on the server you're connected to. The loot editor needs it to open
-at all: loot tables are never synced to clients, so everything it shows is fetched live from the server.
+Saving needs the **`datarewriter.editor.save`** permission on the server you're connected to (operator
+level 2 without LuckPerms — see [Permissions](#permissions)). The loot editor and the recipe tweaker need it
+to open at all: loot tables are never synced to clients, so everything the loot editor shows is fetched
+live from the server. Without it, `/recipeeditor` only shows recipes — or, with a suggestion queue on the
+server, files them as [suggestions](#recipe-suggestions). The editor's text follows the game language
+(English and Ukrainian ship with the mod, every layout's labels included).
 
 ### Picking items and tags
 
@@ -501,6 +509,50 @@ and would interrupt you after every single save, so DataRewriter leaves it to yo
 you like, then run **`/datarewriter reload`** (the save confirmation has a clickable button for it) and
 everything you made appears at once, in one reload. `/reload` and rejoining refresh it too. Until then the
 editor tells you how many edits are waiting, and `/datarewriter status` repeats the count.
+
+### Recipe suggestions
+
+Players without the save right can still **propose** a recipe change from `/recipeeditor`: a new recipe, a
+change to a loaded one, or its removal. The proposal goes to the server's suggestion queue — the one of
+**Eden_LD** (1.3.83+; DataRewriter reaches it by reflection, so it is no dependency). Without such a queue
+on the server, `/recipeeditor` is view-only for them.
+
+- The editor shows **Suggest…** instead of Save. Build the recipe as usual — or load an existing one with
+  EMI's fill (+) button and change it — then pick the kind (*a new recipe*, *change …*, *remove …*) and
+  write why. Keep the id to propose a change to that recipe; clear it for a new one.
+- The server checks the recipe with the real parser first (an unchanged copy of the current recipe is
+  refused), then files it with the player's text: category `datarewriter:recipe`, reference = the recipe
+  id (`new:<result item>` for a new recipe). One open suggestion per player per recipe; Eden's rate limit
+  applies. The player sees the answer in Eden's «Звернення» tab and by Eden mail.
+- With Eden 1.3.84+, the «Звернення» form also offers **Recipe** («Рецепт»), which opens the editor in
+  suggest mode.
+
+**Reviewing.** Staff open a suggestion with **[Open in editor]** in Eden's Moderation window. It opens in
+the recipe editor, in review mode:
+
+- The proposal is in the slots, so *edit-then-accept* is just editing. A side panel (and **Details**) shows
+  the author, their text and what changes slot by slot and field by field; **Current** swaps the
+  panel to the recipe as it is now. It warns when the recipe changed since it was suggested, no longer
+  exists, or is added by one of your config files.
+- **Accept…** (needs `datarewriter.editor.save`) writes the recipe — with a fixed id: an edit keeps the
+  recipe's id, a new recipe gets `datarewriter:suggested/<item>` (editable before accepting) — to
+  `gui-recipes.json5`, with a `suggested_by` note. A removal becomes a `{"id": …}` remove rule. Accepted
+  suggestions do **not** change the running game: they take effect at the next `/reload` or restart, so
+  you can sort them into your topic files first. An optional note goes to the author.
+- **Reject…** asks for a reason, which the author gets.
+- A removal of a recipe that one of your config files *adds* can't be accepted (remove rules never touch
+  added recipes): delete its entry in that file and set the status by hand in Eden.
+
+### Permissions
+
+With **LuckPerms**, a node set on a player or group decides — `true` grants it to a non-op, `false` takes
+it from an op. Unset, or without LuckPerms, the defaults below apply. Changes reach online players at once
+(their command list and editor update without a relog), and so do `/op` and `/deop`.
+
+| Node | Default | What it allows |
+|---|---|---|
+| `datarewriter.editor.save` | operator level 2 | Saving in the recipe, loot table and ritual editors; `/loottableeditor` and `/recipetweaker`; every `/datarewriter` command; accepting recipe suggestions |
+| `datarewriter.suggest` | everyone | Filing [recipe suggestions](#recipe-suggestions) (when the server has a suggestion queue) |
 
 ### Recipe tweaks
 
@@ -735,7 +787,8 @@ Saved recipes always write ingredients in the object form recipes actually use (
 ## Commands
 
 You don't have to dig through mod jars to find recipe or loot table ids. The whole **`/datarewriter` tree
-requires operator level 2**; it is registered server-side, so it works from a vanilla client, and listings
+requires `datarewriter.editor.save`** (operator level 2 without LuckPerms, see [Permissions](#permissions));
+it is registered server-side, so it works from a vanilla client, and listings
 reflect the current state (after your rules) — recipes you added under the `datarewriter:` namespace show
 up too.
 
@@ -748,8 +801,8 @@ up too.
 /datarewriter status                         config files read, and whether each loot table add is in effect
 /datarewriter reload                         push the recipe list to everyone (refreshes EMI/JEI/REI)
 /recipeeditor                                open the recipe editor             (client, needs the mod)
-/recipetweaker                               open the bulk recipe tweaks screen (client, needs the mod)
-/loottableeditor                             open the loot table editor         (client, needs the mod)
+/recipetweaker                               open the bulk recipe tweaks screen (client, needs the mod and the save right)
+/loottableeditor                             open the loot table editor         (client, needs the mod and the save right)
 ```
 
 `/datarewriter hand` prints a bare `mod:item` line (also written to the server log). It lands in your
@@ -805,7 +858,7 @@ move it into your own file.
   is your own config folder; on a dedicated server it is the server's, never your client's). If the file
   is missing there after you pressed Save, the save did not happen — the editor shows the server's answer
   right in the screen (✔ green = written and applied; ✘ red = not saved, and why). The usual reasons: you
-  are not an **operator** (permission level 2) on that server, the server could not write its config
+  lack `datarewriter.editor.save` (operator level 2 without LuckPerms) on that server, the server could not write its config
   folder, or the edit was made on a different server/world than the one you checked. The server log has
   `Loot editor: wrote /full/path/gui-loot-tables.json5` for every successful save (and a `WARN` for every
   refused one). Hosting panels that reset the `config` folder from a template on restart will also wipe

@@ -46,75 +46,152 @@ public final class GuiRecipeSaver {
         }
     }
 
-    /** Validates and appends the recipe to the config file. */
-    public static SaveResult save(MinecraftServer server, String recipeJson) {
+    /**
+     * A recipe from an editor, checked: either {@code error}, or the JSON as sent (with its optional explicit
+     * {@code id}) and the recipe the game parsed from it.
+     */
+    public record Checked(String error, JsonObject json, ResourceLocation explicitId, Recipe<?> recipe) {
+        static Checked failure(String error) {
+            return new Checked(error, null, null, null);
+        }
+    }
+
+    /**
+     * Parses and validates recipe JSON from an editor exactly as the config loader will feed it to the game
+     * later: id (and the {@code suggested_by} note) stripped, shorthand expanded for vanilla types.
+     */
+    public static Checked check(MinecraftServer server, String recipeJson) {
         JsonObject recipe;
         try {
             JsonElement parsed = JsonParser.parseString(recipeJson);
             if (!(parsed instanceof JsonObject obj)) {
-                return SaveResult.failure("the recipe must be a JSON object");
+                return Checked.failure("the recipe must be a JSON object");
             }
             recipe = obj;
         } catch (Exception e) {
-            return SaveResult.failure("invalid JSON: " + e.getMessage());
+            return Checked.failure("invalid JSON: " + e.getMessage());
         }
         if (!(recipe.get("type") instanceof JsonPrimitive)) {
-            return SaveResult.failure("the recipe is missing 'type'");
+            return Checked.failure("the recipe is missing 'type'");
         }
         ResourceLocation explicitId = null;
         if (recipe.get("id") instanceof JsonPrimitive idValue) {
             explicitId = ResourceLocation.tryParse(idValue.getAsString());
             if (explicitId == null) {
-                return SaveResult.failure("'" + idValue.getAsString() + "' is not a valid recipe id");
+                return Checked.failure("'" + idValue.getAsString() + "' is not a valid recipe id");
             }
         }
 
-        // Validate exactly what the config loader will feed the game later:
-        // id stripped, shorthand expanded for vanilla types.
         JsonObject validation = recipe.deepCopy();
         validation.remove("id");
+        validation.remove(ConfigLoader.SUGGESTED_BY);
         RecipeJsonNormalizer.normalize(validation);
         DataResult<Recipe<?>> result = Recipe.CODEC.parse(
                 RegistryOps.create(JsonOps.INSTANCE, server.registryAccess()), validation);
         if (result.error().isPresent()) {
             Datarewriter.LOGGER.warn("Recipe editor: parser rejected this recipe JSON: {}", validation);
-            return SaveResult.failure("rejected by the recipe parser: " + result.error().get().message());
+            return Checked.failure("rejected by the recipe parser: " + result.error().get().message());
         }
+        return new Checked(null, recipe, explicitId, result.result().orElseThrow());
+    }
 
-        JsonObject root;
+    /** Validates and appends the recipe to the config file. */
+    public static SaveResult save(MinecraftServer server, String recipeJson) {
+        Checked checked = check(server, recipeJson);
+        if (checked.error() != null) {
+            return SaveResult.failure(checked.error());
+        }
+        int position;
         try {
-            root = readRoot();
-        } catch (IOException e) {
-            return SaveResult.failure(e.getMessage());
-        }
-
-        JsonObject recipes = recipesSection(root);
-        JsonArray add = recipes.get("add") instanceof JsonArray a ? a : new JsonArray();
-        recipes.add("add", add);
-        boolean replacedEntry = false;
-        if (explicitId != null) {
-            // Saving the same id again replaces the earlier entry instead of
-            // stacking a second one (the loader would warn and take the last).
-            String idText = explicitId.toString();
-            replacedEntry = add.asList().removeIf(e -> e instanceof JsonObject obj
-                    && obj.get("id") instanceof JsonPrimitive p && p.isString()
-                    && ResourceLocation.tryParse(p.getAsString()) != null
-                    && ResourceLocation.tryParse(p.getAsString()).toString().equals(idText));
-        }
-        add.add(recipe);
-
-        try {
-            writeRoot(root);
+            position = writeEntry(checked.json(), checked.explicitId());
         } catch (IOException e) {
             return SaveResult.failure(e.getMessage());
         }
 
         // Without an explicit id, the id must match what ConfigLoader will
         // generate for this entry's position on the next reload.
-        ResourceLocation id = explicitId != null ? explicitId
+        ResourceLocation id = checked.explicitId() != null ? checked.explicitId()
                 : ResourceLocation.fromNamespaceAndPath(Datarewriter.MOD_ID,
-                        ConfigLoader.sanitizePath(FILE_NAME.replaceFirst("\\.json5?$", "")) + "/" + add.size());
-        return new SaveResult(null, new RecipeHolder<>(id, result.result().orElseThrow()));
+                        ConfigLoader.sanitizePath(FILE_NAME.replaceFirst("\\.json5?$", "")) + "/" + position);
+        return new SaveResult(null, new RecipeHolder<>(id, checked.recipe()));
+    }
+
+    /**
+     * Writes an accepted suggestion: validated, appended with its id (replacing an earlier entry of that id), and
+     * left for the next {@code /reload} or restart — the running recipes don't change. Returns an error or null.
+     */
+    public static String saveForReload(MinecraftServer server, String recipeJson) {
+        Checked checked = check(server, recipeJson);
+        if (checked.error() != null) {
+            return checked.error();
+        }
+        if (checked.explicitId() == null) {
+            return "the recipe needs an id";
+        }
+        try {
+            writeEntry(checked.json(), checked.explicitId());
+        } catch (IOException e) {
+            return e.getMessage();
+        }
+        return null;
+    }
+
+    /** Appends {@code recipe} to recipes.add (an entry with the same explicit id is replaced); its 1-based position. */
+    private static int writeEntry(JsonObject recipe, ResourceLocation explicitId) throws IOException {
+        JsonObject root = readRoot();
+        JsonObject recipes = recipesSection(root);
+        JsonArray add = recipes.get("add") instanceof JsonArray a ? a : new JsonArray();
+        recipes.add("add", add);
+        if (explicitId != null) {
+            // Saving the same id again replaces the earlier entry instead of
+            // stacking a second one (the loader would warn and take the last).
+            String idText = explicitId.toString();
+            add.asList().removeIf(e -> idText.equals(entryId(e)));
+        }
+        add.add(recipe);
+        writeRoot(root);
+        return add.size();
+    }
+
+    private static String entryId(JsonElement entry) {
+        if (entry instanceof JsonObject obj && obj.get("id") instanceof JsonPrimitive p && p.isString()) {
+            ResourceLocation id = ResourceLocation.tryParse(p.getAsString());
+            return id == null ? null : id.toString();
+        }
+        return null;
+    }
+
+    /** Drops the recipes.add entry with this id, if the file has one. Returns an error or null. */
+    public static String removeEntry(String recipeId) {
+        try {
+            JsonObject root = readRoot();
+            if (root.get("recipes") instanceof JsonObject recipes && recipes.get("add") instanceof JsonArray add
+                    && add.asList().removeIf(e -> recipeId.equals(entryId(e)))) {
+                writeRoot(root);
+            }
+            return null;
+        } catch (IOException e) {
+            return e.getMessage();
+        }
+    }
+
+    /** The explicit recipe ids in the file's recipes.add (entries waiting for a reload among them). */
+    public static java.util.Set<String> savedIds() {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        try {
+            if (readRoot().get("recipes") instanceof JsonObject recipes
+                    && recipes.get("add") instanceof JsonArray add) {
+                for (JsonElement entry : add) {
+                    String id = entryId(entry);
+                    if (id != null) {
+                        ids.add(id);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            Datarewriter.LOGGER.warn("Recipe editor: {}", e.getMessage());
+        }
+        return ids;
     }
 
     /**

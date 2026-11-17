@@ -175,6 +175,23 @@ receives replaces the entry. DataRewriter's own support for DD Loot Stage's `loo
 Dungeon Difficulty's `local_scaling` (`BundledLootExtensions`, `LevelTableScreen`) is the worked example; a
 registration for the same id replaces a bundled one.
 
+## Opening the recipe editor for a suggestion (client)
+
+A recipe viewer button or a menu can open the [recipe editor](README.md#recipe-editor) for a player to
+[suggest](README.md#recipe-suggestions) a change. Both return a screen to `setScreen`; Close goes back to
+`parent`. Players with `datarewriter.editor.save` get the normal (saving) editor instead.
+
+```java
+// An empty editor in suggest mode (Eden's «Звернення» form uses this).
+minecraft.setScreen(RecipeEditorScreen.forSuggestion(parent));
+// The editor with this recipe loaded, ready to propose a change or its removal.
+minecraft.setScreen(RecipeEditorScreen.suggestChange(parent, recipeHolder));
+```
+
+`DatarewriterClient.maySuggest()` says whether the server takes suggestions from this player right now — hide
+your button when it is false. Layout labels show in the player's language through lang keys; see
+`EditorText` for the key scheme if your layouts should be translated too.
+
 ## Stability
 
 The shapes above — entrypoints, `RewriteRules.Builder`, the two event lists, `EditorLayouts.register` /

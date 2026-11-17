@@ -422,32 +422,34 @@ final class ModernIndustrializationLayouts {
         if (!tier.isEmpty()) {
             tierMax = TIER_MAX_EU.get(tier);
             if (tierMax == null) {
-                throw new IllegalArgumentException("unknown tier '" + tier + "' — use one of "
-                        + String.join(", ", TIER_MAX_EU.keySet()) + " (or leave it empty)");
+                throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.unknown_tier",
+                        "unknown tier '%s' — use one of %s (or leave it empty)",
+                        tier, String.join(", ", TIER_MAX_EU.keySet()));
             }
         }
         if (!recipe.has("eu")) {
             if (tierMax == null) {
-                throw new IllegalArgumentException("set 'EU/t' (or pick a Tier to use its maximum)");
+                throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.set_eu",
+                        "set 'EU/t' (or pick a Tier to use its maximum)");
             }
             recipe.addProperty("eu", (int) Math.min(tierMax, Integer.MAX_VALUE));
         }
         long eu = recipe.get("eu").getAsLong();
         if (eu < 1 || eu > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("'EU/t' must be at least 1");
+            throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.eu_min", "'EU/t' must be at least 1");
         }
         if (tierMax != null && eu > tierMax) {
-            throw new IllegalArgumentException("EU/t " + eu + " is above " + tierName(tier)
-                    + " (max " + tierMax + ") — lower EU/t or pick a higher Tier");
+            throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.above_tier",
+                    "EU/t %s is above %s (max %s) — lower EU/t or pick a higher Tier", eu, tierName(tier), tierMax);
         }
         if (recipe.get("duration").getAsLong() < 1) {
-            throw new IllegalArgumentException("'Time (ticks)' must be at least 1");
+            throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.time_min", "'Time (ticks)' must be at least 1");
         }
         if (!nonEmpty(recipe, "item_inputs") && !nonEmpty(recipe, "fluid_inputs")) {
-            throw new IllegalArgumentException("add at least one item or fluid input");
+            throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.no_input", "add at least one item or fluid input");
         }
         if (!nonEmpty(recipe, "item_outputs") && !nonEmpty(recipe, "fluid_outputs")) {
-            throw new IllegalArgumentException("add at least one item or fluid output");
+            throw new EditorLayout.LayoutError("gui.datarewriter.error.mi.no_output", "add at least one item or fluid output");
         }
     }
 

@@ -1,6 +1,7 @@
 package net.ledok.datarewriter;
 
 import net.ledok.datarewriter.api.DataRewriterEvents;
+import net.ledok.datarewriter.suggest.RecipeSuggestions;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
@@ -24,6 +25,8 @@ public final class Datarewriter {
      * after other mods' runtime loot injections (the loader's loot events) are in the registry.
      */
     public static void onServerStarted(MinecraftServer server) {
+        RecipeSuggestions.register();
+        EditorPermissions.watch(server);
         RecipeRewriter.applyParsedRules(server);
         LootInjectionRewriter.apply(server);
         RewriteState.missingConfigTables(server);

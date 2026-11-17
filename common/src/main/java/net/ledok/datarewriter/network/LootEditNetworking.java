@@ -1,5 +1,6 @@
 package net.ledok.datarewriter.network;
 
+import net.ledok.datarewriter.EditorPermissions;
 import net.ledok.datarewriter.config.ConfigLoader;
 import net.ledok.datarewriter.LootProvenance;
 import com.google.gson.JsonArray;
@@ -47,7 +48,7 @@ import java.util.function.BiConsumer;
  * Server side of the loot table editor. Vanilla clients never send these
  * payloads; servers without the mod have no receivers (the client checks
  * before sending). Each loader module registers the payloads and routes them
- * here; all handlers require permission level 2.
+ * here; all handlers require {@link EditorPermissions#SAVE}.
  */
 public final class LootEditNetworking {
     /** Reassembly buffers for chunked SaveTable payloads, per player. */
@@ -167,12 +168,13 @@ public final class LootEditNetworking {
     }
 
     private static boolean denied(ServerPlayer player) {
-        if (player.hasPermissions(2)) {
+        if (EditorPermissions.canSave(player)) {
             return false;
         }
-        String text = "You need to be an operator (permission level 2) on this server to edit loot tables"
-                + " — nothing was saved.";
-        Datarewriter.LOGGER.warn("Loot editor: refused {} — not an operator", player.getGameProfile().getName());
+        String text = "You need the datarewriter.editor.save permission (or operator level 2 without LuckPerms)"
+                + " on this server to use the loot table editor — nothing was saved.";
+        Datarewriter.LOGGER.warn("Loot editor: refused {} — no datarewriter.editor.save",
+                player.getGameProfile().getName());
         player.sendSystemMessage(prefix().append(Component.literal(text).withStyle(ChatFormatting.RED)));
         if (Network.INSTANCE.canSendToPlayer(player, LootPayloads.SaveResult.TYPE)) {
             Network.INSTANCE.sendToPlayer(player, new LootPayloads.SaveResult(false, text));

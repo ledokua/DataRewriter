@@ -29,7 +29,7 @@ public class TypePickerScreen extends Screen {
     private boolean restoreScroll = true;
 
     public TypePickerScreen(Screen parent, List<EditorLayout> layouts, Consumer<EditorLayout> onPick) {
-        super(Component.literal("Choose a recipe type"));
+        super(EditorText.tr("types.title"));
         this.parent = parent;
         this.layouts = layouts;
         this.filtered = layouts;
@@ -50,12 +50,10 @@ public class TypePickerScreen extends Screen {
 
     @Override
     protected void init() {
-        EditBox searchBox = new EditBox(font, listLeft(), 30, LIST_WIDTH, 18, Component.literal("Search"));
+        EditBox searchBox = new EditBox(font, listLeft(), 30, LIST_WIDTH, 18, EditorText.tr("search"));
         searchBox.setMaxLength(128);
-        searchBox.setHint(Component.literal("search by name or id").withStyle(ChatFormatting.DARK_GRAY));
-        searchBox.setTooltip(Tooltip.create(Component.literal(
-                "All space-separated words must match; @mod filters by namespace "
-                        + "— e.g. '@create mixing'")));
+        searchBox.setHint(EditorText.tr("types.search.hint").withStyle(ChatFormatting.DARK_GRAY));
+        searchBox.setTooltip(Tooltip.create(EditorText.tr("search.tooltip", "@create mixing")));
         searchBox.setValue(query);
         searchBox.setResponder(text -> {
             query = text;
@@ -64,7 +62,7 @@ public class TypePickerScreen extends Screen {
         addRenderableWidget(searchBox);
         setInitialFocus(searchBox);
 
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose())
+        addRenderableWidget(Button.builder(EditorText.tr("cancel"), b -> onClose())
                 .bounds((width - 80) / 2, height - 28, 80, 20)
                 .build());
         refresh();
@@ -73,7 +71,7 @@ public class TypePickerScreen extends Screen {
     private void refresh() {
         String q = query.trim();
         filtered = q.isEmpty() ? layouts : layouts.stream()
-                .filter(l -> SearchQuery.matches(q, l.typeId, l.displayName))
+                .filter(l -> SearchQuery.matches(q, l.typeId, l.displayName + " " + EditorText.layoutName(l).getString()))
                 .toList();
         scrollRow = restoreScroll ? Math.max(0, Math.min(lastScroll, filtered.size() - visibleRows())) : 0;
         restoreScroll = false;
@@ -114,16 +112,16 @@ public class TypePickerScreen extends Screen {
             if (hover) {
                 graphics.fill(left - 2, y, left + LIST_WIDTH + 2, y + ROW_HEIGHT, 0x66FFFFFF);
             }
-            Component line = Component.literal(layout.displayName)
+            Component line = EditorText.layoutName(layout)
                     .append(Component.literal("  " + layout.typeId).withStyle(ChatFormatting.DARK_GRAY));
             graphics.drawString(font, line, left, y + 2, 0xFFFFFF);
         }
 
         int totalRows = filtered.size();
-        String footer = totalRows == 0 ? "no matches"
-                : totalRows + " types" + (totalRows > rows ? " — scroll for more" : "");
-        graphics.drawCenteredString(font, Component.literal(footer).withStyle(ChatFormatting.GRAY),
-                width / 2, top + rows * ROW_HEIGHT + 10, 0xA0A0A0);
+        Component footer = totalRows == 0 ? EditorText.tr("no_matches")
+                : EditorText.tr(totalRows > rows ? "types.count.scroll" : "types.count", totalRows);
+        graphics.drawCenteredString(font, footer.copy().withStyle(ChatFormatting.GRAY),
+                width / 2, Math.min(top + rows * ROW_HEIGHT + 10, height - 40), 0xA0A0A0);
     }
 
     @Override

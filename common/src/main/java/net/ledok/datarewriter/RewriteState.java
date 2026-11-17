@@ -265,7 +265,7 @@ public final class RewriteState {
                     + "modpack sync?) — in-game edits made before that may be lost").withStyle(ChatFormatting.RED));
         }
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (player.hasPermissions(2)) {
+            if (EditorPermissions.canSave(player)) {
                 player.sendSystemMessage(message);
             }
         }
